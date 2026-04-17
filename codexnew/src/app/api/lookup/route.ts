@@ -4,14 +4,22 @@ import { createServiceClient } from '@/lib/supabase/server';
 /**
  * POST /api/lookup
  * 기존 수료 여부 조회 (폰 + 생년월일 + 성명).
- * - 결과: NONE / VALID / EXPIRED
- * - VALID/EXPIRED 시 이름·소속·차량번호·교육구분·마스킹 연락처 등 추가 반환 (출입증 화면용)
+ * - 입력값 정규화 (전화번호 숫자만, 이름 trim)
+ * - Supabase error 를 삼키지 않고 그대로 반환 (진단 가능)
+ * - training_sessions → completions 를 단계별로 조회해 원인 추적 가능
  */
 export async function POST(req: Request) {
   try {
-    const { phone, birthDate, name } = await req.json();
+    const body = await req.json();
+    const rawName: string = body?.name ?? '';
+    const rawPhone: string = body?.phone ?? '';
+    const rawBirth: string = body?.birthDate ?? '';
 
-    if (!phone || !birthDate || !name) {
+    const name = rawName.trim();
+    const phone = rawPhone.replace(/[^0-9]/g, '');
+    const birthDate = rawBirth.trim();
+
+    if (!name || !phone || !birthDate) {
       return NextResponse.json(
         { success: false, code: 'INVALID_INPUT', message: '필수 정보가 누락되었습니다.' },
         { status: 400 }
@@ -20,8 +28,8 @@ export async function POST(req: Request) {
 
     const supabase = createServiceClient();
 
-    // 가장 최근 세션 + 연결된 수료 조회 (target_types JOIN)
-    const { data: sessions } = await supabase
+    // 1. training_sessions 조회
+    const { data: sessions, error: sessionsErr } = await supabase
       .from('training_sessions')
       .select(
         `id, name, affiliation, birth_date, phone, vehicle_number, target_type_id, course_id, created_at,
@@ -32,25 +40,51 @@ export async function POST(req: Request) {
       .eq('name', name)
       .order('created_at', { ascending: false });
 
+    if (sessionsErr) {
+      console.error('[lookup] sessions query error:', sessionsErr);
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'SESSIONS_QUERY_FAILED',
+          message: sessionsErr.message,
+          details: sessionsErr,
+        },
+        { status: 500 }
+      );
+    }
+
     if (!sessions || sessions.length === 0) {
       return NextResponse.json({
         success: true,
-        data: { status: 'NONE' },
+        data: { status: 'NONE', reason: 'NO_SESSION' },
       });
     }
 
+    // 2. completions 조회 (session_id 기준)
     const sessionIds = sessions.map((s) => s.id);
-
-    const { data: completions } = await supabase
+    const { data: completions, error: completionsErr } = await supabase
       .from('completions')
-      .select('*')
+      .select('id, session_id, completion_number, completed_at, expires_at, score')
       .in('session_id', sessionIds)
       .order('completed_at', { ascending: false });
+
+    if (completionsErr) {
+      console.error('[lookup] completions query error:', completionsErr);
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'COMPLETIONS_QUERY_FAILED',
+          message: completionsErr.message,
+          details: completionsErr,
+        },
+        { status: 500 }
+      );
+    }
 
     if (!completions || completions.length === 0) {
       return NextResponse.json({
         success: true,
-        data: { status: 'NONE' },
+        data: { status: 'NONE', reason: 'NO_COMPLETION' },
       });
     }
 
@@ -62,7 +96,6 @@ export async function POST(req: Request) {
     const now = new Date();
     const isValid = now < expiresAt;
 
-    // 개인정보 마스킹 (서버에서 처리)
     const phoneDigits = (session.phone || '').replace(/[^0-9]/g, '');
     const phoneMasked =
       phoneDigits.length >= 10
@@ -72,7 +105,6 @@ export async function POST(req: Request) {
       ? session.birth_date.substring(0, 4)
       : null;
 
-    // Supabase JOIN 결과가 배열 또는 객체로 올 수 있음
     const targetTypes = Array.isArray(session.target_types)
       ? session.target_types[0]
       : session.target_types;
@@ -94,10 +126,14 @@ export async function POST(req: Request) {
         validUntil: latest.expires_at,
       },
     });
-  } catch (e) {
-    console.error(e);
+  } catch (e: any) {
+    console.error('[lookup] unexpected error:', e);
     return NextResponse.json(
-      { success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' },
+      {
+        success: false,
+        code: 'SERVER_ERROR',
+        message: e?.message ?? '서버 오류가 발생했습니다.',
+      },
       { status: 500 }
     );
   }
