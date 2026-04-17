@@ -4,14 +4,17 @@ import { createServiceClient } from '@/lib/supabase/server';
 
 /**
  * GET /api/admin/completions?status=&keyword=&dateFrom=&dateTo=&targetType=
- * 수료 현황 목록 조회 (1차는 GET만).
+ * 수료 현황 목록 조회.
+ * - training_sessions 와 completions 를 별도 조회 후 JS 에서 합친다.
+ *   (PostgREST 중첩 JOIN 이 FK 관계를 못 찾으면 조용히 빈 배열이 되는 문제 회피)
+ * - Supabase error 를 삼키지 않고 500 으로 반환한다.
  */
 export async function GET(req: Request) {
   const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
-  const status = url.searchParams.get('status'); // VALID / EXPIRED / IN_PROGRESS / FAILED
+  const status = url.searchParams.get('status');
   const keyword = url.searchParams.get('keyword');
   const dateFrom = url.searchParams.get('dateFrom');
   const dateTo = url.searchParams.get('dateTo');
@@ -19,14 +22,13 @@ export async function GET(req: Request) {
 
   const supabase = createServiceClient();
 
-  // 세션 기준으로 조회 (완료/미완료 모두 포함)
+  // 1. training_sessions 조회 (target_types JOIN 은 읽기 전용 참조라 안전)
   let sq = supabase
     .from('training_sessions')
     .select(`
-      id, name, affiliation, phone, birth_date, status, created_at,
-      target_types(code, label),
-      completions(id, completion_number, completed_at, expires_at, score)
-    `, { count: 'exact' })
+      id, name, affiliation, phone, birth_date, vehicle_number, status, created_at,
+      target_types(code, label)
+    `)
     .order('created_at', { ascending: false });
 
   if (keyword) sq = sq.or(`name.ilike.%${keyword}%,affiliation.ilike.%${keyword}%`);
@@ -37,32 +39,72 @@ export async function GET(req: Request) {
     sq = sq.lt('created_at', end.toISOString());
   }
   if (targetType) {
-    const { data: tt } = await supabase.from('target_types').select('id').eq('code', targetType).single();
+    const { data: tt, error: ttErr } = await supabase
+      .from('target_types')
+      .select('id')
+      .eq('code', targetType)
+      .single();
+    if (ttErr) {
+      console.error('[admin/completions] target_types error:', ttErr);
+      return NextResponse.json(
+        { success: false, code: 'TARGET_TYPE_QUERY_FAILED', message: ttErr.message },
+        { status: 500 }
+      );
+    }
     if (tt) sq = sq.eq('target_type_id', tt.id);
   }
 
-  const { data, count, error } = await sq.limit(500);
-  if (error) {
-    console.error(error);
+  const { data: sessions, error: sessionsErr } = await sq.limit(500);
+  if (sessionsErr) {
+    console.error('[admin/completions] sessions error:', sessionsErr);
     return NextResponse.json(
-      { success: false, code: 'QUERY_FAILED', message: '조회 실패' },
+      { success: false, code: 'SESSIONS_QUERY_FAILED', message: sessionsErr.message },
       { status: 500 }
     );
   }
 
+  // 2. 해당 세션들의 completions 별도 조회 (중첩 JOIN 대신)
+  const sessionIds = (sessions ?? []).map((s: any) => s.id);
+  let completionMap = new Map<string, any>();
+
+  if (sessionIds.length > 0) {
+    const { data: completions, error: completionsErr } = await supabase
+      .from('completions')
+      .select('id, session_id, completion_number, completed_at, expires_at, score')
+      .in('session_id', sessionIds);
+
+    if (completionsErr) {
+      console.error('[admin/completions] completions error:', completionsErr);
+      return NextResponse.json(
+        { success: false, code: 'COMPLETIONS_QUERY_FAILED', message: completionsErr.message },
+        { status: 500 }
+      );
+    }
+
+    (completions ?? []).forEach((c: any) => {
+      const prev = completionMap.get(c.session_id);
+      if (!prev || new Date(c.completed_at) > new Date(prev.completed_at)) {
+        completionMap.set(c.session_id, c);
+      }
+    });
+  }
+
+  // 3. 합치기 + 상태 재계산
   const now = Date.now();
-  let items = (data ?? []).map((s: any) => {
-    const c = s.completions?.[0];
+  let items = (sessions ?? []).map((s: any) => {
+    const c = completionMap.get(s.id);
     const expired = c ? new Date(c.expires_at).getTime() <= now : false;
     const computedStatus = c ? (expired ? 'EXPIRED' : 'VALID') : s.status;
+    const targetTypes = Array.isArray(s.target_types) ? s.target_types[0] : s.target_types;
     return {
       sessionId: s.id,
       name: s.name,
       affiliation: s.affiliation,
       phone: s.phone,
       birthDate: s.birth_date,
-      targetType: s.target_types?.code,
-      targetLabel: s.target_types?.label,
+      vehicleNumber: s.vehicle_number ?? null,
+      targetType: targetTypes?.code ?? null,
+      targetLabel: targetTypes?.label ?? null,
       status: computedStatus,
       createdAt: s.created_at,
       completionNumber: c?.completion_number ?? null,
@@ -72,7 +114,6 @@ export async function GET(req: Request) {
     };
   });
 
-  // 상태 필터는 조인 결과가 있어야 정확히 분류 가능하므로 서버에서 후처리
   if (status) {
     items = items.filter((it) => it.status === status);
   }
