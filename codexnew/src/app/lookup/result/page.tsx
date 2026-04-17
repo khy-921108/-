@@ -2,22 +2,13 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { formatDate, daysUntil } from '@/lib/format';
 
 interface LookupData {
   status: 'NONE' | 'VALID' | 'EXPIRED';
   completionNumber?: string;
   completedAt?: string;
   validUntil?: string;
-}
-
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function daysUntil(iso: string) {
-  const diff = new Date(iso).getTime() - Date.now();
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
 export default function LookupResultPage() {
