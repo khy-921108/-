@@ -229,7 +229,7 @@ function DetailModal({
         <div className="border-b border-slate-200 p-6">
           <div className="hidden print:block text-center mb-4">
             <h2 className="text-xl font-black text-slate-800">
-              동남알루미늄 안전보건교육 이수 확인서
+              (주)동남 안전보건교육 이수 확인서
             </h2>
             <p className="text-xs text-slate-500 mt-1">출력일: {printDate}</p>
           </div>
