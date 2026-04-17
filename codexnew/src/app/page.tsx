@@ -26,6 +26,12 @@ export default function HomePage() {
         <Link href="/lookup" className="btn-secondary block text-center">
           기존 수료 이력 조회
         </Link>
+        <Link
+          href="/access-pass"
+          className="block w-full rounded-xl bg-emerald-500 px-5 py-4 text-base font-bold text-white shadow transition active:scale-95 text-center"
+        >
+          🪪 출입증 보기
+        </Link>
       </div>
 
       <p className="mt-10 text-xs text-slate-400">
