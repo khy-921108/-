@@ -87,7 +87,6 @@ export default function AdminCompletionsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ESC 키로 모달 닫기
   useEffect(() => {
     const onEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setSelected(null);
@@ -98,6 +97,29 @@ export default function AdminCompletionsPage() {
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleDelete = async (item: Item) => {
+    const isProtected = item.status === 'VALID' || item.status === 'EXPIRED';
+    if (isProtected) {
+      alert('수료 이력이 있는 세션은 삭제할 수 없습니다.\n법적 이행 기록은 보존됩니다.');
+      return;
+    }
+    const ok = confirm(
+      `[${item.name}] 세션을 삭제하시겠습니까?\n시청 기록/시험 이력도 함께 삭제됩니다.\n이 작업은 되돌릴 수 없습니다.`
+    );
+    if (!ok) return;
+
+    const res = await fetch(`/api/admin/sessions/${item.sessionId}`, {
+      method: 'DELETE',
+    });
+    const json = await res.json();
+    if (!json.success) {
+      alert(json.message || '삭제 실패');
+      return;
+    }
+    setSelected(null);
+    await load();
   };
 
   return (
@@ -199,6 +221,7 @@ export default function AdminCompletionsPage() {
           item={selected}
           onClose={() => setSelected(null)}
           onPrint={handlePrint}
+          onDelete={() => handleDelete(selected)}
         />
       )}
     </main>
@@ -209,11 +232,14 @@ function DetailModal({
   item,
   onClose,
   onPrint,
+  onDelete,
 }: {
   item: Item;
   onClose: () => void;
   onPrint: () => void;
+  onDelete: () => void;
 }) {
+  const isProtected = item.status === 'VALID' || item.status === 'EXPIRED';
   const printDate = formatDate(new Date().toISOString());
 
   return (
@@ -225,7 +251,6 @@ function DetailModal({
         className="print-area bg-white rounded-2xl shadow-xl w-full max-w-lg my-8"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 인쇄용 헤더 */}
         <div className="border-b border-slate-200 p-6">
           <div className="hidden print:block text-center mb-4">
             <h2 className="text-xl font-black text-slate-800">
@@ -294,13 +319,28 @@ function DetailModal({
           </div>
         </div>
 
-        <div className="border-t border-slate-200 p-4 flex gap-2 no-print">
-          <button onClick={onClose} className="btn-secondary flex-1">
-            닫기
-          </button>
-          <button onClick={onPrint} className="btn-primary flex-1">
-            🖨️ 인쇄 / PDF 저장
-          </button>
+        <div className="border-t border-slate-200 p-4 space-y-2 no-print">
+          <div className="flex gap-2">
+            <button onClick={onClose} className="btn-secondary flex-1">
+              닫기
+            </button>
+            <button onClick={onPrint} className="btn-primary flex-1">
+              🖨️ 인쇄 / PDF 저장
+            </button>
+          </div>
+          {!isProtected && (
+            <button
+              onClick={onDelete}
+              className="w-full rounded-xl border-2 border-red-500 bg-white px-5 py-3 text-sm font-bold text-red-600 transition active:scale-95 hover:bg-red-50"
+            >
+              🗑️ 세션 삭제 (시청·시험 이력 함께 삭제)
+            </button>
+          )}
+          {isProtected && (
+            <p className="text-xs text-slate-400 text-center pt-1">
+              ※ 수료 이력이 있어 삭제할 수 없습니다.
+            </p>
+          )}
         </div>
       </div>
     </div>
