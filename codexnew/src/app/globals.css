@@ -30,3 +30,45 @@ button {
     @apply mb-2 block text-sm font-semibold text-slate-700;
   }
 }
+
+@media print {
+  @page {
+    margin: 15mm;
+  }
+
+  html, body {
+    background-color: white !important;
+    color: black !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* 인쇄 시 숨김: 관리자 헤더·네비 + 명시적 no-print */
+  header, nav, .no-print {
+    display: none !important;
+  }
+
+  /* 모달 오버레이: 어두운 배경·fixed 위치 해제 → 자연스러운 출력 */
+  .modal-overlay {
+    background: transparent !important;
+    position: static !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* 인쇄 영역: 그림자·테두리 제거, 전체 폭 사용 */
+  .print-area {
+    box-shadow: none !important;
+    border: none !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+  }
+
+  /* 페이지 나누기 방지 */
+  .card, .print-area {
+    page-break-inside: avoid;
+  }
+}
