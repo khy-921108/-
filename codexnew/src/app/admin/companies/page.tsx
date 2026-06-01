@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   COMPANY_STATUS,
   COMPANY_TYPES,
@@ -9,6 +9,12 @@ import {
   type CompanyStatus,
   type CompanyType,
 } from '@/lib/company';
+import {
+  equipmentTypeLabel,
+  memberTypeLabel,
+  type EquipmentType,
+  type MemberType,
+} from '@/lib/equipment';
 
 interface CompanyItem {
   id: string;
@@ -31,6 +37,31 @@ interface Stats {
   disabled: number;
 }
 
+interface MemberItem {
+  id: string;
+  member_type: MemberType;
+  name: string;
+  birth_date: string | null;
+  phone: string | null;
+  vehicle_number: string | null;
+  equipment_type: EquipmentType | null;
+  equipment_type_etc: string | null;
+  spec: string | null;
+  note: string | null;
+  completion_status: 'VALID' | 'EXPIRING7' | 'EXPIRED' | 'NONE';
+  expires_at: string | null;
+}
+
+interface MemberStats {
+  total: number;
+  valid: number;
+  expiring7: number;
+  expired: number;
+  none: number;
+  vehicleCount: number;
+  equipmentCount: number;
+}
+
 function statusBadge(status: CompanyStatus) {
   const map: Record<CompanyStatus, string> = {
     REVIEW: 'bg-amber-100 text-amber-700',
@@ -44,6 +75,26 @@ function statusBadge(status: CompanyStatus) {
   );
 }
 
+function completionBadge(status: MemberItem['completion_status']) {
+  const map = {
+    VALID: 'bg-emerald-100 text-emerald-700',
+    EXPIRING7: 'bg-amber-100 text-amber-700',
+    EXPIRED: 'bg-red-100 text-red-700',
+    NONE: 'bg-slate-100 text-slate-500',
+  };
+  const label = {
+    VALID: '유효',
+    EXPIRING7: '만료7일',
+    EXPIRED: '만료',
+    NONE: '수료없음',
+  };
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold ${map[status]}`}>
+      {label[status]}
+    </span>
+  );
+}
+
 export default function AdminCompaniesPage() {
   const [items, setItems] = useState<CompanyItem[]>([]);
   const [stats, setStats] = useState<Stats>({ total: 0, review: 0, active: 0, disabled: 0 });
@@ -53,6 +104,8 @@ export default function AdminCompaniesPage() {
   const [filterStatus, setFilterStatus] = useState<'' | CompanyStatus>('');
   const [editing, setEditing] = useState<CompanyItem | null>(null);
   const [creating, setCreating] = useState(false);
+  const [viewingMembers, setViewingMembers] = useState<CompanyItem | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -84,6 +137,8 @@ export default function AdminCompaniesPage() {
       if (e.key === 'Escape') {
         setEditing(null);
         setCreating(false);
+        setViewingMembers(null);
+        setImporting(false);
       }
     };
     window.addEventListener('keydown', onEsc);
@@ -94,9 +149,17 @@ export default function AdminCompaniesPage() {
     <main className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-slate-800">업체 관리</h1>
-        <button onClick={() => setCreating(true)} className="text-sm font-bold text-brand hover:underline">
-          + 신규 업체 추가
-        </button>
+        <div className="flex gap-3 text-sm font-bold">
+          <button onClick={() => setImporting(true)} className="text-slate-600 hover:underline">
+            ⬆ 엑셀 업로드
+          </button>
+          <a href="/api/admin/companies/export" className="text-slate-600 hover:underline">
+            ⬇ 엑셀 다운로드
+          </a>
+          <button onClick={() => setCreating(true)} className="text-brand hover:underline">
+            + 신규 업체
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-4 gap-2">
@@ -145,36 +208,47 @@ export default function AdminCompaniesPage() {
       </div>
 
       <div className="space-y-2">
-        <p className="text-xs text-slate-500">총 {items.length}건 · 카드 클릭 시 수정</p>
+        <p className="text-xs text-slate-500">총 {items.length}건 · 카드 클릭 시 수정, "인원" 클릭 시 소속 인원 보기</p>
         {items.map((it) => (
-          <button
-            type="button"
-            key={it.id}
-            onClick={() => setEditing(it)}
-            className="card w-full text-left hover:shadow-md transition space-y-2"
-          >
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="font-bold text-slate-800">{it.name}</p>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {companyTypeLabel(it.company_type)}
-                  {it.biz_no ? ` · 사업자 ${it.biz_no}` : ''}
-                </p>
-                {(it.manager_name || it.phone) && (
-                  <p className="text-xs text-slate-600 mt-0.5">
-                    {it.manager_name || '담당자 미입력'} · {it.phone || '연락처 없음'}
+          <div key={it.id} className="card hover:shadow-md transition space-y-2">
+            <div
+              className="cursor-pointer space-y-2"
+              onClick={() => setEditing(it)}
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="font-bold text-slate-800">{it.name}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {companyTypeLabel(it.company_type)}
+                    {it.biz_no ? ` · 사업자 ${it.biz_no}` : ''}
                   </p>
-                )}
+                  {(it.manager_name || it.phone) && (
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      {it.manager_name || '담당자 미입력'} · {it.phone || '연락처 없음'}
+                    </p>
+                  )}
+                </div>
+                {statusBadge(it.status)}
               </div>
-              {statusBadge(it.status)}
+              {it.note && (
+                <p className="text-xs text-slate-500 truncate">메모: {it.note}</p>
+              )}
+              <p className="text-[11px] text-slate-400">
+                등록주체: {it.created_by === 'APPLICANT' ? '신청자' : '관리자'}
+              </p>
             </div>
-            {it.note && (
-              <p className="text-xs text-slate-500 truncate">메모: {it.note}</p>
-            )}
-            <p className="text-[11px] text-slate-400">
-              등록주체: {it.created_by === 'APPLICANT' ? '신청자' : '관리자'}
-            </p>
-          </button>
+            <div className="pt-2 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setViewingMembers(it);
+                }}
+                className="text-xs font-bold text-brand hover:underline"
+              >
+                👥 인원/현황 보기 →
+              </button>
+            </div>
+          </div>
         ))}
         {items.length === 0 && !loading && (
           <div className="card text-center text-slate-500 py-8">조회 결과가 없습니다.</div>
@@ -192,6 +266,23 @@ export default function AdminCompaniesPage() {
           onSaved={async () => {
             setEditing(null);
             setCreating(false);
+            await load();
+          }}
+        />
+      )}
+
+      {viewingMembers && (
+        <MembersModal
+          company={viewingMembers}
+          onClose={() => setViewingMembers(null)}
+        />
+      )}
+
+      {importing && (
+        <ImportModal
+          onClose={() => setImporting(false)}
+          onDone={async () => {
+            setImporting(false);
             await load();
           }}
         />
@@ -303,11 +394,7 @@ function CompanyEditModal({
         <div className="p-4 space-y-3">
           <div>
             <label className="label">업체명 *</label>
-            <input
-              className="input-base"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
+            <input className="input-base" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
             <label className="label">사업자번호</label>
@@ -386,6 +473,353 @@ function CompanyEditModal({
           <button onClick={onSave} disabled={saving} className="btn-primary flex-1">
             {saving ? '저장 중...' : '저장'}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MembersModal({
+  company,
+  onClose,
+}: {
+  company: CompanyItem;
+  onClose: () => void;
+}) {
+  const [items, setItems] = useState<MemberItem[]>([]);
+  const [stats, setStats] = useState<MemberStats>({
+    total: 0,
+    valid: 0,
+    expiring7: 0,
+    expired: 0,
+    none: 0,
+    vehicleCount: 0,
+    equipmentCount: 0,
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/admin/companies/${company.id}/members`);
+        const json = await res.json();
+        if (json.success) {
+          setItems(json.data.items);
+          setStats(json.data.stats);
+        }
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [company.id]);
+
+  return (
+    <div
+      className="modal-overlay fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-4 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-xl w-full max-w-2xl my-8"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-slate-200 p-4 flex justify-between items-center">
+          <div>
+            <h2 className="text-lg font-bold text-slate-800">{company.name} · 소속 인원</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {companyTypeLabel(company.company_type)} · {companyStatusLabel(company.status)}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-700 text-2xl leading-none"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="p-4 space-y-3">
+          <div className="grid grid-cols-4 gap-2">
+            <StatCard label="총 인원" value={stats.total} />
+            <StatCard label="유효" value={stats.valid} color="text-emerald-700" />
+            <StatCard label="만료7일" value={stats.expiring7} color="text-amber-700" />
+            <StatCard label="만료/없음" value={stats.expired + stats.none} color="text-slate-500" />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <StatCard label="차량 보유" value={stats.vehicleCount} />
+            <StatCard label="장비 보유" value={stats.equipmentCount} />
+          </div>
+
+          {loading ? (
+            <p className="text-center text-slate-500 py-6">조회 중...</p>
+          ) : items.length === 0 ? (
+            <div className="card text-center text-slate-500 py-8">소속 인원이 없습니다.</div>
+          ) : (
+            <ul className="space-y-1">
+              {items.map((m) => (
+                <li key={m.id} className="rounded-xl border border-slate-100 bg-white p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-800 truncate">
+                        {m.name}{' '}
+                        <span className="text-xs font-normal text-slate-500">
+                          ({memberTypeLabel(m.member_type)})
+                        </span>
+                      </p>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        {m.birth_date || '생년월일 미입력'} · {m.phone || '연락처 미입력'}
+                      </p>
+                      {(m.vehicle_number || m.equipment_type || m.spec) && (
+                        <p className="text-xs text-slate-600 mt-0.5">
+                          {m.vehicle_number ? `🚗 ${m.vehicle_number}` : ''}
+                          {m.equipment_type
+                            ? ` · ${equipmentTypeLabel(m.equipment_type)}${m.equipment_type === 'ETC' && m.equipment_type_etc ? `(${m.equipment_type_etc})` : ''}`
+                            : ''}
+                          {m.spec ? ` · ${m.spec}` : ''}
+                        </p>
+                      )}
+                    </div>
+                    <div className="shrink-0 text-right space-y-1">
+                      {completionBadge(m.completion_status)}
+                      {m.expires_at && (
+                        <p className="text-[10px] text-slate-400">
+                          ~{m.expires_at.substring(0, 10)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="border-t border-slate-200 p-4">
+          <button onClick={onClose} className="btn-secondary w-full">
+            닫기
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ImportPreviewResp {
+  success: boolean;
+  code?: string;
+  message?: string;
+  data?: {
+    dryRun: boolean;
+    companies: { count: number; rows: any[] } | { inserted: number; updated: number };
+    members:
+      | { count: number; rows: any[] }
+      | { inserted: number; updated: number; skipped: number };
+    errors: { sheet: string; rowIndex: number; field?: string; message: string }[];
+    warnings: { sheet: string; rowIndex: number; message: string }[];
+  };
+}
+
+function ImportModal({
+  onClose,
+  onDone,
+}: {
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<ImportPreviewResp | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [committed, setCommitted] = useState(false);
+  const [err, setErr] = useState('');
+
+  const doDryRun = async () => {
+    if (!file) {
+      setErr('파일을 선택해 주세요.');
+      return;
+    }
+    setErr('');
+    setLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/admin/companies/import?dryRun=1', {
+        method: 'POST',
+        body: fd,
+      });
+      const json: ImportPreviewResp = await res.json();
+      setPreview(json);
+      if (!json.success && json.message) setErr(json.message);
+    } catch (e) {
+      console.error(e);
+      setErr('네트워크 오류');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const doCommit = async () => {
+    if (!file) return;
+    setErr('');
+    setLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/admin/companies/import', {
+        method: 'POST',
+        body: fd,
+      });
+      const json: ImportPreviewResp = await res.json();
+      setPreview(json);
+      if (json.success) {
+        setCommitted(true);
+      } else if (json.message) {
+        setErr(json.message);
+      }
+    } catch (e) {
+      console.error(e);
+      setErr('네트워크 오류');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const hasErrors = !!preview?.data?.errors?.length;
+  const previewReady = !!preview && !committed;
+
+  return (
+    <div
+      className="modal-overlay fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-4 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-xl w-full max-w-2xl my-8"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-slate-200 p-4 flex justify-between items-center">
+          <h2 className="text-lg font-bold text-slate-800">엑셀 업로드 (업체 + 인원)</h2>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-700 text-2xl leading-none"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="p-4 space-y-3">
+          <p className="text-xs text-slate-500">
+            먼저 "엑셀 다운로드" 로 받은 양식에 맞춰 작성한 후 업로드 → 검증 결과를 확인하고 반영하세요.
+          </p>
+
+          <div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".xlsx"
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null;
+                setFile(f);
+                setPreview(null);
+                setCommitted(false);
+              }}
+              className="w-full text-sm"
+            />
+            {file && (
+              <p className="text-xs text-slate-500 mt-1">선택됨: {file.name}</p>
+            )}
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={doDryRun}
+              disabled={loading || !file}
+              className="btn-secondary flex-1"
+            >
+              {loading && !committed ? '검증 중...' : '🔍 검증 (미리보기)'}
+            </button>
+            <button
+              onClick={doCommit}
+              disabled={loading || !previewReady || hasErrors}
+              className="btn-primary flex-1"
+            >
+              {committed ? '✅ 반영 완료' : '⬆ DB 반영'}
+            </button>
+          </div>
+
+          {err && <div className="rounded-lg bg-red-50 p-2 text-xs text-red-700">{err}</div>}
+
+          {preview?.data && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs space-y-2">
+              <p className="font-bold text-slate-800">
+                {preview.data.dryRun ? '미리보기 결과' : '반영 결과'}
+              </p>
+              {preview.data.dryRun ? (
+                <div className="space-y-1 text-slate-700">
+                  <p>업체 시트: {(preview.data.companies as any).count}건</p>
+                  <p>인원 시트: {(preview.data.members as any).count}건</p>
+                </div>
+              ) : (
+                <div className="space-y-1 text-slate-700">
+                  <p>
+                    업체 — 신규 {(preview.data.companies as any).inserted ?? 0} /
+                    업데이트 {(preview.data.companies as any).updated ?? 0}
+                  </p>
+                  <p>
+                    인원 — 신규 {(preview.data.members as any).inserted ?? 0} /
+                    업데이트 {(preview.data.members as any).updated ?? 0} /
+                    건너뜀 {(preview.data.members as any).skipped ?? 0}
+                  </p>
+                </div>
+              )}
+
+              {preview.data.errors.length > 0 && (
+                <details open>
+                  <summary className="font-bold text-red-700 cursor-pointer">
+                    오류 ({preview.data.errors.length}건)
+                  </summary>
+                  <ul className="mt-1 space-y-0.5">
+                    {preview.data.errors.slice(0, 30).map((e, i) => (
+                      <li key={i} className="text-red-700">
+                        [{e.sheet} {e.rowIndex}행{e.field ? ` · ${e.field}` : ''}] {e.message}
+                      </li>
+                    ))}
+                    {preview.data.errors.length > 30 && (
+                      <li className="text-slate-500">... 그리고 {preview.data.errors.length - 30}건 더</li>
+                    )}
+                  </ul>
+                </details>
+              )}
+
+              {preview.data.warnings.length > 0 && (
+                <details>
+                  <summary className="font-bold text-amber-700 cursor-pointer">
+                    경고 ({preview.data.warnings.length}건)
+                  </summary>
+                  <ul className="mt-1 space-y-0.5">
+                    {preview.data.warnings.slice(0, 30).map((w, i) => (
+                      <li key={i} className="text-amber-700">
+                        [{w.sheet} {w.rowIndex}행] {w.message}
+                      </li>
+                    ))}
+                    {preview.data.warnings.length > 30 && (
+                      <li className="text-slate-500">... 그리고 {preview.data.warnings.length - 30}건 더</li>
+                    )}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-slate-200 p-4 flex gap-2">
+          <button onClick={onClose} className="btn-secondary flex-1">
+            {committed ? '닫기' : '취소'}
+          </button>
+          {committed && (
+            <button onClick={onDone} className="btn-primary flex-1">
+              목록 새로고침
+            </button>
+          )}
         </div>
       </div>
     </div>
