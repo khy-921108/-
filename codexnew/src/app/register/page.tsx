@@ -8,6 +8,7 @@ import {
   companyTypeLabel,
   type CompanyType,
 } from '@/lib/company';
+import { EQUIPMENT_TYPES, type EquipmentType } from '@/lib/equipment';
 
 type TargetCode = 'TRUCK' | 'WORKER' | 'HEAVY';
 
@@ -49,6 +50,12 @@ export default function RegisterPage() {
   const [phone, setPhone] = useState('');
   const [targetTypeCode, setTargetTypeCode] = useState<TargetCode | ''>('');
   const [vehicleNumber, setVehicleNumber] = useState('');
+
+  // 1B 확장 필드
+  const [spec, setSpec] = useState('');
+  const [equipmentType, setEquipmentType] = useState<EquipmentType | ''>('');
+  const [equipmentTypeEtc, setEquipmentTypeEtc] = useState('');
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -56,7 +63,6 @@ export default function RegisterPage() {
     targetTypeCode === 'TRUCK' || targetTypeCode === 'HEAVY';
 
   useEffect(() => {
-    // 동의를 먼저 하도록 강제
     if (sessionStorage.getItem('consent') !== 'Y') {
       router.replace('/consent');
     }
@@ -65,7 +71,7 @@ export default function RegisterPage() {
   // 업체 검색 (디바운스)
   const searchTimer = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
-    if (selectedCompany) return; // 선택된 상태에선 검색 중지
+    if (selectedCompany) return;
     if (searchTimer.current) clearTimeout(searchTimer.current);
     if (!companyTouched) return;
 
@@ -91,6 +97,21 @@ export default function RegisterPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyKeyword, selectedCompany, companyTouched]);
+
+  // 대상 변경 시 종속 필드 리셋
+  useEffect(() => {
+    if (targetTypeCode !== 'TRUCK' && targetTypeCode !== 'HEAVY') {
+      setSpec('');
+    }
+    if (targetTypeCode !== 'HEAVY') {
+      setEquipmentType('');
+      setEquipmentTypeEtc('');
+    }
+    if (!vehicleRequired) {
+      setVehicleNumber('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetTypeCode]);
 
   const formatPhone = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 11);
 
@@ -139,7 +160,6 @@ export default function RegisterPage() {
         setNewCompanyError(json.message || '등록 실패');
         return;
       }
-      // 등록 후 바로 선택 가능
       onSelectCompany(json.data as CompanySummary);
       setNewCompanyManager('');
       setNewCompanyPhone('');
@@ -151,6 +171,11 @@ export default function RegisterPage() {
     }
   };
 
+  // 폼 검증 (1B 추가)
+  const specRequired = targetTypeCode === 'TRUCK' || targetTypeCode === 'HEAVY';
+  const equipmentRequired = targetTypeCode === 'HEAVY';
+  const equipmentEtcRequired = equipmentType === 'ETC';
+
   const canSubmit =
     !!selectedCompany &&
     name.trim() &&
@@ -158,6 +183,9 @@ export default function RegisterPage() {
     phone.length >= 10 &&
     targetTypeCode &&
     (!vehicleRequired || vehicleNumber.trim().length > 0) &&
+    (!specRequired || spec.trim().length > 0) &&
+    (!equipmentRequired || equipmentType !== '') &&
+    (!equipmentEtcRequired || equipmentTypeEtc.trim().length > 0) &&
     !loading;
 
   const onSubmit = async () => {
@@ -169,7 +197,6 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      // 1. 기존 수료 조회
       const lookupRes = await fetch('/api/lookup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -183,18 +210,23 @@ export default function RegisterPage() {
         return;
       }
 
-      // 2. 세션 생성
       const res = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           companyId: selectedCompany.id,
-          affiliation: selectedCompany.name, // 백업용 — 서버가 companyId 우선 사용
+          affiliation: selectedCompany.name,
           name,
           birthDate,
           phone,
           targetTypeCode,
           vehicleNumber: vehicleRequired ? vehicleNumber.trim() : null,
+          spec: specRequired ? spec.trim() : null,
+          equipmentType: equipmentRequired ? equipmentType : null,
+          equipmentTypeEtc:
+            equipmentRequired && equipmentType === 'ETC'
+              ? equipmentTypeEtc.trim()
+              : null,
           consentYn: true,
         }),
       });
@@ -432,6 +464,41 @@ export default function RegisterPage() {
             ))}
           </div>
         </div>
+
+        {/* 중장비: 장비종류 (필수) — 차량번호 위에 배치 */}
+        {targetTypeCode === 'HEAVY' && (
+          <>
+            <div>
+              <label className="label">장비종류</label>
+              <select
+                className="input-base"
+                value={equipmentType}
+                onChange={(e) =>
+                  setEquipmentType(e.target.value as EquipmentType | '')
+                }
+              >
+                <option value="">선택해 주세요</option>
+                {EQUIPMENT_TYPES.map((t) => (
+                  <option key={t.code} value={t.code}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {equipmentType === 'ETC' && (
+              <div>
+                <label className="label">장비종류 (직접입력)</label>
+                <input
+                  className="input-base"
+                  value={equipmentTypeEtc}
+                  onChange={(e) => setEquipmentTypeEtc(e.target.value)}
+                  placeholder="예: 항타기"
+                />
+              </div>
+            )}
+          </>
+        )}
+
         {vehicleRequired && (
           <div>
             <label className="label">차량번호</label>
@@ -444,6 +511,23 @@ export default function RegisterPage() {
             <p className="mt-1 text-xs text-slate-500">
               ※ 화물차·중장비 기사는 출입 차량 식별을 위해 차량번호를 반드시 입력해 주세요.
             </p>
+          </div>
+        )}
+
+        {/* 화물차/중장비 공통: 톤수/규격 */}
+        {specRequired && (
+          <div>
+            <label className="label">
+              {targetTypeCode === 'TRUCK' ? '톤수 / 규격' : '규격 / 톤수'}
+            </label>
+            <input
+              className="input-base"
+              value={spec}
+              onChange={(e) => setSpec(e.target.value)}
+              placeholder={
+                targetTypeCode === 'TRUCK' ? '예: 5톤 / 카고' : '예: 2.5톤 / 디젤'
+              }
+            />
           </div>
         )}
       </div>
