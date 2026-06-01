@@ -266,4 +266,202 @@ export default function RegisterPage() {
               {companyTouched && (
                 <div className="mt-2 space-y-2">
                   {companySearching ? (
-                    <p className="text-xs text-s
+                    <p className="text-xs text-slate-400 px-1">검색 중...</p>
+                  ) : companyResults.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 text-center text-sm text-slate-500">
+                      검색된 업체가 없습니다.
+                    </div>
+                  ) : (
+                    <ul className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100 overflow-hidden">
+                      {companyResults.map((c) => (
+                        <li key={c.id}>
+                          <button
+                            type="button"
+                            onClick={() => onSelectCompany(c)}
+                            className="w-full px-4 py-3 text-left hover:bg-slate-50"
+                          >
+                            <p className="font-semibold text-slate-800">{c.name}</p>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              {companyTypeLabel(c.company_type)} ·{' '}
+                              {companyStatusLabel(c.status)}
+                            </p>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {!showNewCompany && (
+                    <button
+                      type="button"
+                      onClick={onOpenNewCompany}
+                      className="w-full rounded-xl border-2 border-dashed border-brand bg-white px-4 py-3 text-sm font-bold text-brand hover:bg-brand/5"
+                    >
+                      + 신규 업체 등록
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {showNewCompany && (
+                <div className="mt-3 rounded-xl border-2 border-brand/40 bg-white p-4 space-y-3">
+                  <h3 className="text-sm font-bold text-slate-800">신규 업체 등록</h3>
+                  <p className="text-xs text-slate-500">
+                    등록 후 관리자 검토(검토중 상태)를 거쳐 정식 등록됩니다.
+                  </p>
+                  <div>
+                    <label className="label">업체명 *</label>
+                    <input
+                      className="input-base"
+                      value={newCompanyName}
+                      onChange={(e) => setNewCompanyName(e.target.value)}
+                      placeholder="예: A물류"
+                    />
+                  </div>
+                  <div>
+                    <label className="label">업체 구분</label>
+                    <select
+                      className="input-base"
+                      value={newCompanyType}
+                      onChange={(e) =>
+                        setNewCompanyType(e.target.value as CompanyType)
+                      }
+                    >
+                      {COMPANY_TYPES.map((t) => (
+                        <option key={t.code} value={t.code}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">담당자명 (선택)</label>
+                    <input
+                      className="input-base"
+                      value={newCompanyManager}
+                      onChange={(e) => setNewCompanyManager(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="label">담당자 연락처 (선택, 숫자만)</label>
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      className="input-base"
+                      value={newCompanyPhone}
+                      onChange={(e) =>
+                        setNewCompanyPhone(formatPhone(e.target.value))
+                      }
+                      placeholder="01012345678"
+                    />
+                  </div>
+                  {newCompanyError && (
+                    <div className="rounded-lg bg-red-50 p-2 text-xs text-red-700">
+                      {newCompanyError}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowNewCompany(false)}
+                      className="btn-secondary"
+                    >
+                      취소
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onSubmitNewCompany}
+                      disabled={newCompanyLoading}
+                      className="btn-primary"
+                    >
+                      {newCompanyLoading ? '등록 중...' : '등록 후 선택'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div>
+          <label className="label">성명</label>
+          <input
+            className="input-base"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="홍길동"
+          />
+        </div>
+        <div>
+          <label className="label">생년월일</label>
+          <input
+            type="date"
+            className="input-base"
+            value={birthDate}
+            onChange={(e) => setBirthDate(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="label">연락처 (숫자만)</label>
+          <input
+            type="tel"
+            inputMode="numeric"
+            className="input-base"
+            value={phone}
+            onChange={(e) => setPhone(formatPhone(e.target.value))}
+            placeholder="01012345678"
+          />
+        </div>
+        <div>
+          <label className="label">대상 구분</label>
+          <div className="grid grid-cols-3 gap-2">
+            {TARGETS.map((t) => (
+              <button
+                key={t.code}
+                type="button"
+                onClick={() => setTargetTypeCode(t.code)}
+                className={`rounded-xl border-2 py-4 font-bold transition ${
+                  targetTypeCode === t.code
+                    ? 'border-brand bg-brand/5 text-brand'
+                    : 'border-slate-200 bg-white text-slate-600'
+                }`}
+              >
+                <div className="text-2xl">{t.emoji}</div>
+                <div className="mt-1 text-xs">{t.label}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+        {vehicleRequired && (
+          <div>
+            <label className="label">차량번호</label>
+            <input
+              className="input-base"
+              value={vehicleNumber}
+              onChange={(e) => setVehicleNumber(e.target.value)}
+              placeholder="예: 12가3456"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              ※ 화물차·중장비 기사는 출입 차량 식별을 위해 차량번호를 반드시 입력해 주세요.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={onSubmit}
+        disabled={!canSubmit}
+        className="btn-primary"
+      >
+        {loading ? '확인 중...' : '교육 시작'}
+      </button>
+    </main>
+  );
+}
