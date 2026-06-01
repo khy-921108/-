@@ -160,4 +160,54 @@ export async function POST(req: Request) {
 
     if (!course) {
       return NextResponse.json(
-        { success: 
+        { success: false, code: 'NO_ACTIVE_COURSE', message: '활성화된 교육 과정이 없습니다.' },
+        { status: 400 }
+      );
+    }
+
+    // 세션 생성 — affiliation + company_id + spec/equipment_type 동시 저장
+    const { data: session, error } = await supabase
+      .from('training_sessions')
+      .insert({
+        affiliation: resolvedAffiliation,
+        company_id: resolvedCompanyId,
+        name: trimmedName,
+        birth_date: birthDate,
+        phone,
+        vehicle_number: vehicleRequired ? vehicleNumberTrimmed : null,
+        spec: specTrimmed || null,
+        equipment_type: resolvedEquipmentType,
+        equipment_type_etc:
+          resolvedEquipmentType === 'ETC' ? equipmentTypeEtcTrimmed || null : null,
+        target_type_id: targetType.id,
+        course_id: course.id,
+        consent_yn: true,
+        status: 'IN_PROGRESS',
+      })
+      .select()
+      .single();
+
+    if (error || !session) {
+      console.error(error);
+      return NextResponse.json(
+        { success: false, code: 'SAVE_FAILED', message: '세션 생성에 실패했습니다.' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        sessionId: session.id,
+        courseId: course.id,
+        status: 'IN_PROGRESS',
+      },
+    });
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json(
+      { success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' },
+      { status: 500 }
+    );
+  }
+}
