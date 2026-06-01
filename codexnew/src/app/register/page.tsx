@@ -1,7 +1,13 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  COMPANY_TYPES,
+  companyStatusLabel,
+  companyTypeLabel,
+  type CompanyType,
+} from '@/lib/company';
 
 type TargetCode = 'TRUCK' | 'WORKER' | 'HEAVY';
 
@@ -11,15 +17,43 @@ const TARGETS: { code: TargetCode; label: string; emoji: string }[] = [
   { code: 'HEAVY', label: '중장비 기사', emoji: '🏗️' },
 ];
 
+interface CompanySummary {
+  id: string;
+  name: string;
+  company_type: CompanyType;
+  status: string;
+}
+
 export default function RegisterPage() {
   const router = useRouter();
-  const [affiliation, setAffiliation] = useState('');
+
+  // 업체 검색/선택
+  const [companyKeyword, setCompanyKeyword] = useState('');
+  const [companyResults, setCompanyResults] = useState<CompanySummary[]>([]);
+  const [companySearching, setCompanySearching] = useState(false);
+  const [companyTouched, setCompanyTouched] = useState(false);
+  const [selectedCompany, setSelectedCompany] = useState<CompanySummary | null>(null);
+
+  // 업체 신규 등록 인라인 폼
+  const [showNewCompany, setShowNewCompany] = useState(false);
+  const [newCompanyName, setNewCompanyName] = useState('');
+  const [newCompanyType, setNewCompanyType] = useState<CompanyType>('GENERAL');
+  const [newCompanyManager, setNewCompanyManager] = useState('');
+  const [newCompanyPhone, setNewCompanyPhone] = useState('');
+  const [newCompanyLoading, setNewCompanyLoading] = useState(false);
+  const [newCompanyError, setNewCompanyError] = useState('');
+
+  // 기본정보
   const [name, setName] = useState('');
   const [birthDate, setBirthDate] = useState('');
   const [phone, setPhone] = useState('');
   const [targetTypeCode, setTargetTypeCode] = useState<TargetCode | ''>('');
+  const [vehicleNumber, setVehicleNumber] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const vehicleRequired =
+    targetTypeCode === 'TRUCK' || targetTypeCode === 'HEAVY';
 
   useEffect(() => {
     // 동의를 먼저 하도록 강제
@@ -28,17 +62,109 @@ export default function RegisterPage() {
     }
   }, [router]);
 
+  // 업체 검색 (디바운스)
+  const searchTimer = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => {
+    if (selectedCompany) return; // 선택된 상태에선 검색 중지
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (!companyTouched) return;
+
+    searchTimer.current = setTimeout(async () => {
+      setCompanySearching(true);
+      try {
+        const q = companyKeyword.trim();
+        const url = q
+          ? `/api/companies?keyword=${encodeURIComponent(q)}`
+          : '/api/companies';
+        const res = await fetch(url);
+        const json = await res.json();
+        if (json.success) setCompanyResults(json.data.items ?? []);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setCompanySearching(false);
+      }
+    }, 250);
+
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyKeyword, selectedCompany, companyTouched]);
+
   const formatPhone = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 11);
 
+  const onSelectCompany = (c: CompanySummary) => {
+    setSelectedCompany(c);
+    setCompanyKeyword(c.name);
+    setCompanyResults([]);
+    setShowNewCompany(false);
+  };
+
+  const onClearCompany = () => {
+    setSelectedCompany(null);
+    setCompanyKeyword('');
+    setCompanyResults([]);
+    setShowNewCompany(false);
+    setCompanyTouched(true);
+  };
+
+  const onOpenNewCompany = () => {
+    setShowNewCompany(true);
+    setNewCompanyName(companyKeyword.trim());
+    setNewCompanyError('');
+  };
+
+  const onSubmitNewCompany = async () => {
+    setNewCompanyError('');
+    const trimmed = newCompanyName.trim();
+    if (!trimmed) {
+      setNewCompanyError('업체명을 입력해 주세요.');
+      return;
+    }
+    setNewCompanyLoading(true);
+    try {
+      const res = await fetch('/api/companies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: trimmed,
+          companyType: newCompanyType,
+          managerName: newCompanyManager.trim() || undefined,
+          phone: newCompanyPhone.trim() || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setNewCompanyError(json.message || '등록 실패');
+        return;
+      }
+      // 등록 후 바로 선택 가능
+      onSelectCompany(json.data as CompanySummary);
+      setNewCompanyManager('');
+      setNewCompanyPhone('');
+    } catch (e) {
+      console.error(e);
+      setNewCompanyError('네트워크 오류가 발생했습니다.');
+    } finally {
+      setNewCompanyLoading(false);
+    }
+  };
+
   const canSubmit =
-    affiliation.trim() &&
+    !!selectedCompany &&
     name.trim() &&
     birthDate &&
     phone.length >= 10 &&
     targetTypeCode &&
+    (!vehicleRequired || vehicleNumber.trim().length > 0) &&
     !loading;
 
   const onSubmit = async () => {
+    if (!selectedCompany) {
+      setError('업체를 먼저 선택해 주세요.');
+      return;
+    }
     setError('');
     setLoading(true);
 
@@ -52,7 +178,6 @@ export default function RegisterPage() {
       const lookup = await lookupRes.json();
 
       if (lookup.success && lookup.data.status === 'VALID') {
-        // 이미 유효한 수료 있음 → 상태 화면으로
         sessionStorage.setItem('existingCompletion', JSON.stringify(lookup.data));
         router.push('/lookup/result');
         return;
@@ -63,11 +188,13 @@ export default function RegisterPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          affiliation,
+          companyId: selectedCompany.id,
+          affiliation: selectedCompany.name, // 백업용 — 서버가 companyId 우선 사용
           name,
           birthDate,
           phone,
           targetTypeCode,
+          vehicleNumber: vehicleRequired ? vehicleNumber.trim() : null,
           consentYn: true,
         }),
       });
@@ -99,80 +226,44 @@ export default function RegisterPage() {
       </header>
 
       <div className="space-y-4">
+        {/* 업체 검색/선택 */}
         <div>
           <label className="label">소속 (업체명)</label>
-          <input
-            className="input-base"
-            value={affiliation}
-            onChange={(e) => setAffiliation(e.target.value)}
-            placeholder="예: A물류"
-          />
-        </div>
-        <div>
-          <label className="label">성명</label>
-          <input
-            className="input-base"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="홍길동"
-          />
-        </div>
-        <div>
-          <label className="label">생년월일</label>
-          <input
-            type="date"
-            className="input-base"
-            value={birthDate}
-            onChange={(e) => setBirthDate(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label">연락처 (숫자만)</label>
-          <input
-            type="tel"
-            inputMode="numeric"
-            className="input-base"
-            value={phone}
-            onChange={(e) => setPhone(formatPhone(e.target.value))}
-            placeholder="01012345678"
-          />
-        </div>
-        <div>
-          <label className="label">대상 구분</label>
-          <div className="grid grid-cols-3 gap-2">
-            {TARGETS.map((t) => (
+
+          {selectedCompany ? (
+            <div className="flex items-center justify-between rounded-xl border-2 border-brand bg-brand/5 px-4 py-3">
+              <div>
+                <p className="font-bold text-slate-800">{selectedCompany.name}</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {companyTypeLabel(selectedCompany.company_type)} ·{' '}
+                  {companyStatusLabel(selectedCompany.status)}
+                </p>
+              </div>
               <button
-                key={t.code}
                 type="button"
-                onClick={() => setTargetTypeCode(t.code)}
-                className={`rounded-xl border-2 py-4 font-bold transition ${
-                  targetTypeCode === t.code
-                    ? 'border-brand bg-brand/5 text-brand'
-                    : 'border-slate-200 bg-white text-slate-600'
-                }`}
+                onClick={onClearCompany}
+                className="text-sm text-slate-500 hover:text-slate-700 underline"
               >
-                <div className="text-2xl">{t.emoji}</div>
-                <div className="mt-1 text-xs">{t.label}</div>
+                변경
               </button>
-            ))}
-          </div>
-        </div>
-      </div>
+            </div>
+          ) : (
+            <>
+              <input
+                className="input-base"
+                value={companyKeyword}
+                onFocus={() => setCompanyTouched(true)}
+                onChange={(e) => {
+                  setCompanyKeyword(e.target.value);
+                  setCompanyTouched(true);
+                }}
+                placeholder="업체명을 입력해 검색하세요"
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                업체를 검색해 선택하거나, 검색 결과에 없으면 아래 "신규 업체 등록"을 눌러 등록해 주세요.
+              </p>
 
-      {error && (
-        <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
-      <button
-        type="button"
-        onClick={onSubmit}
-        disabled={!canSubmit}
-        className="btn-primary"
-      >
-        {loading ? '확인 중...' : '교육 시작'}
-      </button>
-    </main>
-  );
-}
+              {companyTouched && (
+                <div className="mt-2 space-y-2">
+                  {companySearching ? (
+                    <p className="text-xs text-s
