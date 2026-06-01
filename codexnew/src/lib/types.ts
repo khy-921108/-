@@ -1,6 +1,32 @@
+import type { CompanyType, CompanyStatus, CompanyCreatedBy } from './company';
+
 export type TargetTypeCode = 'TRUCK' | 'WORKER' | 'HEAVY';
 
 export type SessionStatus = 'IN_PROGRESS' | 'FAILED' | 'COMPLETED' | 'EXPIRED';
+
+export type { CompanyType, CompanyStatus, CompanyCreatedBy };
+
+export interface Company {
+  id: string;
+  name: string;
+  biz_no: string | null;
+  company_type: CompanyType;
+  manager_name: string | null;
+  phone: string | null;
+  status: CompanyStatus;
+  created_by: CompanyCreatedBy;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 신청자 공개 검색 응답 — PII 제외 (담당자/연락처/사업자번호/비고 미포함) */
+export interface CompanyPublicSummary {
+  id: string;
+  name: string;
+  company_type: CompanyType;
+  status: CompanyStatus;
+}
 
 export interface TargetType {
   id: number;
@@ -46,6 +72,7 @@ export interface QuestionClient {
 export interface TrainingSession {
   id: string;
   affiliation: string;
+  company_id: string | null;
   name: string;
   birth_date: string;
   phone: string;
