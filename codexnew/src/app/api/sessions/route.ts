@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { isEquipmentType, type EquipmentType } from '@/lib/equipment';
 
 /**
  * POST /api/sessions
@@ -9,6 +10,10 @@ import { createServiceClient } from '@/lib/supabase/server';
  * 1A 변경:
  * - companyId(선택)를 받아 companies 에서 업체명을 조회하여 affiliation 스냅샷으로 함께 저장.
  * - companyId 가 없으면 기존처럼 affiliation 자유입력만 사용 (구버전 호환).
+ *
+ * 1B 변경:
+ * - spec (톤수/규격), equipmentType, equipmentTypeEtc 추가 저장.
+ * - HEAVY → equipmentType 필수. equipmentType=='ETC' 일 때 equipmentTypeEtc 필수.
  */
 export async function POST(req: Request) {
   try {
@@ -21,6 +26,9 @@ export async function POST(req: Request) {
       phone,
       targetTypeCode,
       vehicleNumber,
+      spec,
+      equipmentType,
+      equipmentTypeEtc,
       consentYn,
     } = body;
 
@@ -61,6 +69,35 @@ export async function POST(req: Request) {
       );
     }
 
+    // spec / equipment_type / equipment_type_etc 검증
+    const specTrimmed = typeof spec === 'string' ? spec.trim() : '';
+    const equipmentTypeEtcTrimmed =
+      typeof equipmentTypeEtc === 'string' ? equipmentTypeEtc.trim() : '';
+
+    let resolvedEquipmentType: EquipmentType | null = null;
+    if (equipmentType != null && equipmentType !== '') {
+      if (!isEquipmentType(equipmentType)) {
+        return NextResponse.json(
+          { success: false, code: 'INVALID_EQUIPMENT_TYPE', message: '장비종류가 올바르지 않습니다.' },
+          { status: 400 }
+        );
+      }
+      resolvedEquipmentType = equipmentType;
+    }
+
+    if (targetTypeCode === 'HEAVY' && !resolvedEquipmentType) {
+      return NextResponse.json(
+        { success: false, code: 'EQUIPMENT_TYPE_REQUIRED', message: '중장비는 장비종류를 선택해 주세요.' },
+        { status: 400 }
+      );
+    }
+    if (resolvedEquipmentType === 'ETC' && !equipmentTypeEtcTrimmed) {
+      return NextResponse.json(
+        { success: false, code: 'EQUIPMENT_TYPE_ETC_REQUIRED', message: '장비종류 "기타" 선택 시 직접입력값이 필요합니다.' },
+        { status: 400 }
+      );
+    }
+
     const supabase = createServiceClient();
 
     // 0. company_id 가 있으면 업체 조회 → 업체명을 affiliation 스냅샷으로 채움
@@ -94,7 +131,6 @@ export async function POST(req: Request) {
         );
       }
       resolvedCompanyId = company.id;
-      // 업체명을 스냅샷으로 강제 — 업체명 변경 시에도 신청 시점 라벨 보존
       resolvedAffiliation = company.name;
     }
 
@@ -124,50 +160,4 @@ export async function POST(req: Request) {
 
     if (!course) {
       return NextResponse.json(
-        { success: false, code: 'NO_ACTIVE_COURSE', message: '활성화된 교육 과정이 없습니다.' },
-        { status: 400 }
-      );
-    }
-
-    // 세션 생성 — affiliation + company_id 동시 저장 (affiliation 은 스냅샷)
-    const { data: session, error } = await supabase
-      .from('training_sessions')
-      .insert({
-        affiliation: resolvedAffiliation,
-        company_id: resolvedCompanyId,
-        name: trimmedName,
-        birth_date: birthDate,
-        phone,
-        vehicle_number: vehicleRequired ? vehicleNumberTrimmed : null,
-        target_type_id: targetType.id,
-        course_id: course.id,
-        consent_yn: true,
-        status: 'IN_PROGRESS',
-      })
-      .select()
-      .single();
-
-    if (error || !session) {
-      console.error(error);
-      return NextResponse.json(
-        { success: false, code: 'SAVE_FAILED', message: '세션 생성에 실패했습니다.' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        sessionId: session.id,
-        courseId: course.id,
-        status: 'IN_PROGRESS',
-      },
-    });
-  } catch (e) {
-    console.error(e);
-    return NextResponse.json(
-      { success: false, code: 'SERVER_ERROR', message: '서버 오류가 발생했습니다.' },
-      { status: 500 }
-    );
-  }
-}
+        { success: 
