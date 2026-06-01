@@ -51,6 +51,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <nav className="bg-slate-700 text-slate-200 px-4 flex gap-1 overflow-x-auto text-sm">
         <NavLink href="/admin/dashboard">대시보드</NavLink>
         <NavLink href="/admin/completions">수료 현황</NavLink>
+        <NavLink href="/admin/companies">업체 관리</NavLink>
         <NavLink href="/admin/questions">시험문제</NavLink>
         <NavLink href="/admin/courses">교육 과정</NavLink>
       </nav>
