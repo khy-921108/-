@@ -1,10 +1,29 @@
 import type { CompanyType, CompanyStatus, CompanyCreatedBy } from './company';
+import type { EquipmentType, MemberType } from './equipment';
 
 export type TargetTypeCode = 'TRUCK' | 'WORKER' | 'HEAVY';
 
 export type SessionStatus = 'IN_PROGRESS' | 'FAILED' | 'COMPLETED' | 'EXPIRED';
 
 export type { CompanyType, CompanyStatus, CompanyCreatedBy };
+export type { EquipmentType, MemberType };
+
+export interface CompanyMember {
+  id: string;
+  company_id: string | null;
+  member_type: MemberType;
+  name: string;
+  birth_date: string | null;
+  phone: string | null;
+  normalized_phone: string | null;
+  vehicle_number: string | null;
+  equipment_type: EquipmentType | null;
+  equipment_type_etc: string | null;
+  spec: string | null;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface Company {
   id: string;
@@ -78,6 +97,10 @@ export interface TrainingSession {
   phone: string;
   target_type_id: number;
   course_id: number;
+  vehicle_number: string | null;
+  spec: string | null;
+  equipment_type: EquipmentType | null;
+  equipment_type_etc: string | null;
   consent_yn: boolean;
   video_completed_yn: boolean;
   status: SessionStatus;
