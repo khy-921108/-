@@ -202,7 +202,7 @@ function fillPledgeSheet(wb: ExcelJS.Workbook, ws: ExcelJS.Worksheet, p: DocsOut
       const imageId = wb.addImage({ base64, extension: 'png' });
       // tl/ext: 0-indexed col/row + 픽셀 크기. 하단 'A24:F25' 병합칸의 3번째 줄(서약자·(서명)) 위에 앉힘.
       ws.addImage(imageId, {
-        tl: { col: 3.5, row: 24.25 },
+        tl: { col: 3.8, row: 24.25 },
         ext: { width: 120, height: 30 },
       } as any);
     } catch (e) {
