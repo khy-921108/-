@@ -76,7 +76,7 @@ export default function WorkPermitConfirm() {
   return (
     <main className="space-y-6">
       <header>
-        <p className="text-sm font-semibold text-brand">STEP 4 / 4</p>
+        <p className="text-sm font-semibold text-brand">STEP 5 / 5</p>
         <h1 className="mt-1 text-2xl font-bold text-slate-800">최종 확인</h1>
         <p className="mt-1 text-sm text-slate-500">제출 시 참여자 교육 유효성을 서버에서 다시 확인합니다.</p>
       </header>
@@ -105,7 +105,7 @@ export default function WorkPermitConfirm() {
       {error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
       <div className="flex gap-2">
-        <button type="button" onClick={() => router.push('/work-permit/participants')} className="btn-secondary">이전</button>
+        <button type="button" onClick={() => router.push('/work-permit/docs')} className="btn-secondary">이전</button>
         <button type="button" onClick={submit} disabled={submitting} className="btn-primary">
           {submitting ? '제출 중...' : '신청 제출'}
         </button>
