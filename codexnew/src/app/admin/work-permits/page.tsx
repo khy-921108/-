@@ -5,6 +5,14 @@ import { useRouter } from 'next/navigation';
 import { formatDate } from '@/lib/format';
 import { SUPPLEMENTAL_WORKS } from '@/lib/work-permit-constants';
 
+interface SigStatus {
+  total: number;
+  signed: number;
+  unsigned: number;
+  unsignedNames: string[];
+  participants: { name: string; signed: boolean }[];
+}
+
 interface Item {
   permitId: string;
   permitNumber: string;
@@ -18,6 +26,7 @@ interface Item {
   supplemental: Record<string, 'Y' | 'N'>;
   status: string;
   createdAt: string;
+  signature?: SigStatus;
 }
 
 function fmtDateTime(iso: string): string {
@@ -34,6 +43,7 @@ export default function AdminWorkPermitsPage() {
   const [keyword, setKeyword] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [unsignedOnly, setUnsignedOnly] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -62,6 +72,10 @@ export default function AdminWorkPermitsPage() {
   const openDetail = (permitId: string) => {
     router.push(`/work-permit/print/${permitId}`);
   };
+
+  const visibleItems = unsignedOnly
+    ? items.filter((it) => (it.signature?.unsigned ?? 0) > 0)
+    : items;
 
   return (
     <main className="space-y-4">
@@ -93,12 +107,22 @@ export default function AdminWorkPermitsPage() {
             />
           </div>
         </div>
+        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={unsignedOnly}
+            onChange={(e) => setUnsignedOnly(e.target.checked)}
+            className="h-4 w-4"
+          />
+          ⚠️ 서명 미완료만 보기
+        </label>
         <div className="flex gap-2">
           <button
             onClick={() => {
               setKeyword('');
               setDateFrom('');
               setDateTo('');
+              setUnsignedOnly(false);
               setTimeout(load, 0);
             }}
             className="btn-secondary"
@@ -110,9 +134,12 @@ export default function AdminWorkPermitsPage() {
       </div>
 
       <div className="space-y-2">
-        <p className="text-xs text-slate-500">총 {items.length}건 · 카드를 누르면 상세/인쇄로 이동</p>
-        {items.map((it) => {
+        <p className="text-xs text-slate-500">
+          총 {visibleItems.length}건{unsignedOnly ? ` (서명 미완료만 · 전체 ${items.length}건)` : ''} · 카드를 누르면 상세/인쇄로 이동
+        </p>
+        {visibleItems.map((it) => {
           const supp = suppLabels(it.supplemental);
+          const sig = it.signature;
           return (
             <div
               key={it.permitId}
@@ -135,8 +162,40 @@ export default function AdminWorkPermitsPage() {
                   )}
                   <p className="text-xs text-slate-400 mt-0.5">신청일 {formatDate(it.createdAt)}</p>
                 </div>
-                <span className="text-slate-300 text-lg shrink-0">›</span>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  {sig && sig.total > 0 && (
+                    sig.unsigned === 0 ? (
+                      <span className="rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-0.5 whitespace-nowrap">
+                        ✅ 서명완료 {sig.signed}/{sig.total}
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-amber-100 text-amber-800 text-xs font-bold px-2 py-0.5 whitespace-nowrap">
+                        ⚠️ 미완료 {sig.unsigned}명
+                      </span>
+                    )
+                  )}
+                  <span className="text-slate-300 text-lg">›</span>
+                </div>
               </div>
+
+              {sig && sig.participants.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-100">
+                  <span className="text-[11px] text-slate-400 mr-1">개인서약 서명:</span>
+                  {sig.participants.map((pp, i) => (
+                    <span
+                      key={`${pp.name}-${i}`}
+                      className={
+                        'text-[11px] rounded px-1.5 py-0.5 ' +
+                        (pp.signed
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : 'bg-amber-50 text-amber-800 font-bold ring-1 ring-amber-300')
+                      }
+                    >
+                      {pp.signed ? '✓' : '✗'} {pp.name || '(이름없음)'}
+                    </span>
+                  ))}
+                </div>
+              )}
               <div className="flex gap-3 pt-2 border-t border-slate-100">
                 <a
                   href={`/work-permit/print/${it.permitId}`}
@@ -158,8 +217,10 @@ export default function AdminWorkPermitsPage() {
             </div>
           );
         })}
-        {items.length === 0 && !loading && (
-          <div className="card text-center text-slate-500 py-8">신청 내역이 없습니다.</div>
+        {visibleItems.length === 0 && !loading && (
+          <div className="card text-center text-slate-500 py-8">
+            {unsignedOnly && items.length > 0 ? '서명 미완료 신청이 없습니다.' : '신청 내역이 없습니다.'}
+          </div>
         )}
       </div>
     </main>
