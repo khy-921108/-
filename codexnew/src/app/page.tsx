@@ -38,6 +38,12 @@ export default function HomePage() {
         >
           📝 작업허가서 신청
         </Link>
+        <Link
+          href="/work-permit/my"
+          className="block w-full rounded-xl border-2 border-slate-800 bg-white px-5 py-4 text-base font-bold text-slate-800 transition active:scale-95 text-center"
+        >
+          📋 내 작업허가 조회
+        </Link>
       </div>
 
       <p className="mt-10 text-xs text-slate-400">
