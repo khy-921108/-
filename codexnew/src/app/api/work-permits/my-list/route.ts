@@ -3,13 +3,15 @@ import { createServiceClient } from '@/lib/supabase/server';
 
 /**
  * POST /api/work-permits/my-list  (공개) — 신청자 본인 신청내역 조회
- * - 본인(applicant_name + applicant_phone) 일치 건만 반환. 타인 명단 덤프 없음.
+ * - 본인(applicant_name + applicant_phone) 일치 건만. 작업예정일(work_start) 범위 필터.
  */
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
     const name = (typeof body.name === 'string' ? body.name : '').trim();
     const phone = (typeof body.phone === 'string' ? body.phone : '').replace(/[^0-9]/g, '');
+    const dateFrom = (typeof body.dateFrom === 'string' ? body.dateFrom : '').trim();
+    const dateTo = (typeof body.dateTo === 'string' ? body.dateTo : '').trim();
 
     if (!name || phone.length < 10) {
       return NextResponse.json(
@@ -19,7 +21,7 @@ export async function POST(req: Request) {
     }
 
     const supabase = createServiceClient();
-    const { data: permits, error } = await supabase
+    let q = supabase
       .from('work_permits')
       .select(
         'id, permit_number, work_name, work_start, work_end, request_company_name, supplemental, status, created_at'
@@ -28,6 +30,15 @@ export async function POST(req: Request) {
       .eq('applicant_phone', phone)
       .order('work_start', { ascending: false })
       .limit(200);
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) {
+      q = q.gte('work_start', `${dateFrom}T00:00:00+09:00`);
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
+      q = q.lte('work_start', `${dateTo}T23:59:59+09:00`);
+    }
+
+    const { data: permits, error } = await q;
 
     if (error) {
       console.error('[work-permits/my-list] error:', error);
