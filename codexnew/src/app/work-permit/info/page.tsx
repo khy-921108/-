@@ -104,7 +104,7 @@ export default function WorkPermitInfo() {
   return (
     <main className="space-y-6">
       <header>
-        <p className="text-sm font-semibold text-brand">STEP 2 / 4</p>
+        <p className="text-sm font-semibold text-brand">STEP 2 / 5</p>
         <h1 className="mt-1 text-2xl font-bold text-slate-800">작업정보</h1>
         <p className="mt-1 text-sm text-slate-500">일반위험작업 허가서가 기본 적용됩니다.</p>
       </header>
