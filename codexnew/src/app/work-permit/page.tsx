@@ -162,7 +162,7 @@ export default function WorkPermitStart() {
   return (
     <main className="space-y-6">
       <header>
-        <p className="text-sm font-semibold text-brand">STEP 1 / 4</p>
+        <p className="text-sm font-semibold text-brand">STEP 1 / 5</p>
         <h1 className="mt-1 text-2xl font-bold text-slate-800">신청자 본인확인</h1>
         <p className="mt-1 text-sm text-slate-500">
           작업허가 신청은 <b>안전교육 수료 + 업체 등록</b>을 마친 분만 가능합니다.
@@ -193,6 +193,13 @@ export default function WorkPermitStart() {
           {error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}
           <button type="button" onClick={onVerify} disabled={loading} className="btn-primary">
             {loading ? '확인 중...' : '본인확인'}
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push('/work-permit/my')}
+            className="w-full text-center text-sm text-slate-500 underline mt-1"
+          >
+            이미 신청한 내역 조회 →
           </button>
         </div>
       ) : (
