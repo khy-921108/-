@@ -27,6 +27,8 @@ export default function MyWorkPermits() {
   const router = useRouter();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [items, setItems] = useState<Item[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -44,7 +46,7 @@ export default function MyWorkPermits() {
       const res = await fetch('/api/work-permits/my-list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, phone }),
+        body: JSON.stringify({ name, phone, dateFrom, dateTo }),
       });
       const json = await res.json();
       if (!json.success) {
@@ -88,6 +90,26 @@ export default function MyWorkPermits() {
             onChange={(e) => setPhone(formatPhone(e.target.value))}
             placeholder="01012345678"
           />
+        </div>
+        <div>
+          <label className="label">작업예정일 범위 (선택)</label>
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              type="date"
+              className="input-base"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              aria-label="작업예정일 시작"
+            />
+            <input
+              type="date"
+              className="input-base"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              aria-label="작업예정일 종료"
+            />
+          </div>
+          <p className="mt-1 text-xs text-slate-500">※ 비워두면 전체 기간 조회</p>
         </div>
         {error && <div className="rounded-lg bg-red-50 p-2 text-sm text-red-700">{error}</div>}
         <button onClick={search} disabled={loading} className="btn-primary">
