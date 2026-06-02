@@ -52,6 +52,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <NavLink href="/admin/dashboard">대시보드</NavLink>
         <NavLink href="/admin/completions">수료 현황</NavLink>
         <NavLink href="/admin/companies">업체 관리</NavLink>
+        <NavLink href="/admin/work-permits">작업허가</NavLink>
         <NavLink href="/admin/questions">시험문제</NavLink>
         <NavLink href="/admin/courses">교육 과정</NavLink>
       </nav>
