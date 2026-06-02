@@ -97,13 +97,13 @@ export default function WorkPermitParticipants() {
       return;
     }
     writeDraft({ participants: list });
-    router.push('/work-permit/confirm');
+    router.push('/work-permit/docs');
   };
 
   return (
     <main className="space-y-6">
       <header>
-        <p className="text-sm font-semibold text-brand">STEP 3 / 4</p>
+        <p className="text-sm font-semibold text-brand">STEP 3 / 5</p>
         <h1 className="mt-1 text-2xl font-bold text-slate-800">참여자 확인</h1>
         <p className="mt-1 text-sm text-slate-500">
           참여자별 본인확인 후 추가합니다. 교육 유효성은 <b>작업 종료일</b> 기준입니다.
