@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { getDocsForOutput } from '@/lib/safety-doc-status';
 
+/**
+ * GET /api/work-permits/:id  (공개, UUID 알아야) — 인쇄/양식용 데이터
+ */
 export async function GET(_req: Request, ctx: { params: { id: string } }) {
   const supabase = createServiceClient();
 
@@ -32,7 +36,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
   const { data: parts, error: partErr } = await supabase
     .from('work_permit_participants')
     .select(
-      'name, company_name, target_type, vehicle_number, equipment_type, spec, completed_at, expires_at, sort_order'
+      'name, phone, company_name, target_type, vehicle_number, equipment_type, spec, completed_at, expires_at, sort_order'
     )
     .eq('work_permit_id', ctx.params.id)
     .order('sort_order', { ascending: true });
@@ -43,6 +47,19 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       { success: false, code: 'QUERY_FAILED', message: '참여자 조회 중 오류가 발생했습니다.' },
       { status: 500 }
     );
+  }
+
+  let docs = null;
+  try {
+    docs = await getDocsForOutput(supabase, {
+      companyId: permit.request_company_id ?? null,
+      workStart: permit.work_start,
+      participants: (parts ?? []).map((p: any) => ({
+        name: p.name, phone: p.phone ?? null, companyName: p.company_name,
+      })),
+    });
+  } catch (e) {
+    console.error('[work-permits/:id] docs:', e);
   }
 
   return NextResponse.json({
@@ -77,6 +94,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       })),
       note: permit.note,
       createdAt: permit.created_at,
+      docs,
     },
   });
 }
