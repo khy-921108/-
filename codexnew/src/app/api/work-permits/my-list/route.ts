@@ -3,19 +3,21 @@ import { createServiceClient } from '@/lib/supabase/server';
 
 /**
  * POST /api/work-permits/my-list  (공개) — 신청자 본인 신청내역 조회
- * - 본인(applicant_name + applicant_phone) 일치 건만. 작업예정일(work_start) 범위 필터.
+ * - 본인(applicant_name + applicant_birth_date + applicant_phone) 3필드 일치 건만.
+ * - 작업예정일(work_start) 범위 필터.
  */
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
     const name = (typeof body.name === 'string' ? body.name : '').trim();
+    const birthDate = (typeof body.birthDate === 'string' ? body.birthDate : '').trim();
     const phone = (typeof body.phone === 'string' ? body.phone : '').replace(/[^0-9]/g, '');
     const dateFrom = (typeof body.dateFrom === 'string' ? body.dateFrom : '').trim();
     const dateTo = (typeof body.dateTo === 'string' ? body.dateTo : '').trim();
 
-    if (!name || phone.length < 10) {
+    if (!name || !birthDate || phone.length < 10) {
       return NextResponse.json(
-        { success: false, code: 'INVALID_INPUT', message: '이름과 연락처를 정확히 입력해 주세요.' },
+        { success: false, code: 'INVALID_INPUT', message: '이름·생년월일·연락처를 정확히 입력해 주세요.' },
         { status: 400 }
       );
     }
@@ -27,6 +29,7 @@ export async function POST(req: Request) {
         'id, permit_number, work_name, work_start, work_end, request_company_name, supplemental, status, created_at'
       )
       .eq('applicant_name', name)
+      .eq('applicant_birth_date', birthDate)
       .eq('applicant_phone', phone)
       .order('work_start', { ascending: false })
       .limit(200);
