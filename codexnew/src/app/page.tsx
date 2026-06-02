@@ -32,6 +32,12 @@ export default function HomePage() {
         >
           🪪 출입증 보기
         </Link>
+        <Link
+          href="/work-permit"
+          className="block w-full rounded-xl bg-slate-800 px-5 py-4 text-base font-bold text-white shadow transition active:scale-95 text-center"
+        >
+          📝 작업허가서 신청
+        </Link>
       </div>
 
       <p className="mt-10 text-xs text-slate-400">
