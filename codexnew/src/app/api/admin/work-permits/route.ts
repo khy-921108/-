@@ -8,14 +8,16 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const keyword = (url.searchParams.get('keyword') ?? '').trim();
+  const dateFrom = (url.searchParams.get('dateFrom') ?? '').trim();
+  const dateTo = (url.searchParams.get('dateTo') ?? '').trim();
 
   const supabase = createServiceClient();
   let q = supabase
     .from('work_permits')
     .select(
-      'id, permit_number, permit_type, request_company_name, work_name, applicant_name, supplemental, status, created_at'
+      'id, permit_number, permit_type, request_company_name, work_name, work_start, work_end, applicant_name, supplemental, status, created_at'
     )
-    .order('created_at', { ascending: false })
+    .order('work_start', { ascending: false })
     .limit(500);
 
   if (keyword) {
@@ -25,6 +27,13 @@ export async function GET(req: Request) {
         `permit_number.ilike.%${safe}%,request_company_name.ilike.%${safe}%,work_name.ilike.%${safe}%,applicant_name.ilike.%${safe}%`
       );
     }
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) {
+    q = q.gte('work_start', `${dateFrom}T00:00:00+09:00`);
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
+    q = q.lte('work_start', `${dateTo}T23:59:59+09:00`);
   }
 
   const { data: permits, error } = await q;
@@ -54,6 +63,8 @@ export async function GET(req: Request) {
     permitType: p.permit_type,
     companyName: p.request_company_name,
     workName: p.work_name,
+    workStart: p.work_start,
+    workEnd: p.work_end,
     applicantName: p.applicant_name,
     participantCount: countMap.get(p.id) ?? 0,
     supplemental: p.supplemental ?? {},
