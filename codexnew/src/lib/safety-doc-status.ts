@@ -194,4 +194,75 @@ export interface DocsOutput {
     members: { name: string; birthDate: string | null; phone: string | null }[];
   } | null;
   eduResult: {
-    date
+    date: string;
+    content: string;
+    names: string[];
+  };
+}
+
+export async function getDocsForOutput(
+  supabase: SupabaseClient,
+  opts: {
+    companyId: string | null;
+    workStart: string;
+    participants: { name: string; phone: string | null; companyName: string | null }[];
+  }
+): Promise<DocsOutput> {
+  const pledges: DocsOutput['pledges'] = [];
+  for (const p of opts.participants) {
+    const name = (p.name ?? '').trim();
+    const normPhone = normalizePhone(p.phone);
+    let saved: any = null;
+    if (name && normPhone) {
+      const { data } = await supabase
+        .from('safety_pledges')
+        .select('birth_date, phone, company_name, nationality, blood_type, job_type, signature, issued_at')
+        .eq('name', name)
+        .eq('normalized_phone', normPhone)
+        .order('issued_at', { ascending: false })
+        .limit(1);
+      saved = (data ?? [])[0] ?? null;
+    }
+    pledges.push({
+      name,
+      companyName: p.companyName ?? saved?.company_name ?? null,
+      birthDate: saved?.birth_date ?? null,
+      phone: p.phone ?? saved?.phone ?? null,
+      nationality: saved?.nationality ?? null,
+      bloodType: saved?.blood_type ?? null,
+      jobType: saved?.job_type ?? null,
+      signature: saved?.signature ?? null,
+      workDate: opts.workStart,
+    });
+  }
+
+  let undertaking: DocsOutput['undertaking'] = null;
+  if (opts.companyId) {
+    const { data } = await supabase
+      .from('company_undertakings')
+      .select('company_name, work_area, manager_name, manager_phone, members, issued_at, expires_at')
+      .eq('company_id', opts.companyId)
+      .order('issued_at', { ascending: false })
+      .limit(1);
+    const u = (data ?? [])[0];
+    if (u) {
+      undertaking = {
+        companyName: u.company_name ?? null,
+        workArea: u.work_area ?? null,
+        issuedAt: u.issued_at ?? null,
+        expiresAt: u.expires_at ?? null,
+        managerName: u.manager_name ?? null,
+        managerPhone: u.manager_phone ?? null,
+        members: Array.isArray(u.members) ? u.members : [],
+      };
+    }
+  }
+
+  const eduResult: DocsOutput['eduResult'] = {
+    date: opts.workStart,
+    content: '신규 안전·보건 교육 이수 (작업 전 안전교육·TBM 포함)',
+    names: opts.participants.map((p) => (p.name ?? '').trim()).filter(Boolean),
+  };
+
+  return { pledges, undertaking, eduResult };
+}
