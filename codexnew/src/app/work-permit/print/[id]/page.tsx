@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { GENERAL_SAFETY_MEASURES, SUPPLEMENTAL_WORKS, TBM_CHECKLIST } from '@/lib/work-permit-constants';
+import { workTypesFor } from '@/lib/work-permit-types';
 
 function fmtDate(iso: string): string {
   if (!iso) return '-';
@@ -41,14 +42,38 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
   const left = GENERAL_SAFETY_MEASURES.filter((m) => m.side === 'L');
   const right = GENERAL_SAFETY_MEASURES.filter((m) => m.side === 'R');
   const docs = data.docs ?? null;
+  const suppTypes = workTypesFor(supp); // 1C-3 보충작업 별지(체크분만)
+
+  // 개인서약 서명 완료/미완료 집계 (화면 안내용 — 인쇄에는 미표시)
+  const plg: any[] = docs?.pledges ?? [];
+  const unsignedNames = plg.filter((p) => !p.signature).map((p) => p.name);
+  const sigTotal = plg.length;
+  const sigSigned = sigTotal - unsignedNames.length;
 
   return (
     <main className="wp-print">
+      {/* 화면 전용 버튼 */}
       <div className="no-print mb-4 flex gap-2">
         <button onClick={() => window.print()} className="btn-primary">🖨 인쇄</button>
         <a href={`/api/work-permits/${params.id}/xlsx`} className="btn-secondary text-center">📥 회사 양식 .xlsx</a>
       </div>
 
+      {/* 화면 전용 서명 상태 안내 */}
+      {sigTotal > 0 && (
+        unsignedNames.length === 0 ? (
+          <div className="no-print mb-4 rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-700">
+            ✅ 참여자 개인서약 서명 완료 ({sigSigned}/{sigTotal}명)
+          </div>
+        ) : (
+          <div className="no-print mb-4 rounded-xl bg-amber-50 border border-amber-300 p-3 text-sm text-amber-800 space-y-1">
+            <p>⚠️ 개인서약 <b>서명 미완료 {unsignedNames.length}명</b> ({sigSigned}/{sigTotal} 완료) — 미서명자는 출력본에 빈칸으로 인쇄됩니다.</p>
+            <p className="text-xs">미서명: {unsignedNames.join(', ')}</p>
+            <p className="text-xs">※ 작업 시작 전까지 본인이 <a href="/work-permit/sign" className="font-bold underline">‘내 서약 서명’</a>에서 서명하면 됩니다.</p>
+          </div>
+        )
+      )}
+
+      {/* 페이지 1 — 일반위험작업허가서 */}
       <section className="permit-page">
         <h1 className="title">일반위험작업 허가서</h1>
         <table className="t">
@@ -124,6 +149,7 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
         </tbody></table>
       </section>
 
+      {/* 페이지 2 — TBM */}
       <section className="permit-page">
         <h1 className="title">작업 전 안전미팅 (TBM)</h1>
         <table className="t"><tbody>
@@ -166,6 +192,46 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
         </tbody></table>
       </section>
 
+      {/* 보충작업 별지 (1C-3) — 체크된 종류만, 헤더만 자동 / 안전조치·측정·서명은 현장 빈칸 */}
+      {suppTypes.map((t) => (
+        <section key={`supp-${t.key}`} className="permit-page">
+          <h1 className="title">{t.label}작업 허가서</h1>
+          <table className="t"><tbody>
+            <tr>
+              <th>허가번호</th><td>{data.permitNumber}</td>
+              <th>허가일자</th><td>{fmtDate(data.createdAt)}</td>
+            </tr>
+            <tr>
+              <th>신청인</th>
+              <td>직책 {info.applicantTitle || '—'} / 성명 {info.applicantName} <span className="sign">(서명)</span></td>
+              <th>작업요청 업체</th><td>{data.companyName}</td>
+            </tr>
+            <tr>
+              <th>허가기간</th>
+              <td colSpan={3}>{fmtDateTime(info.workStart)} ~ {fmtDateTime(info.workEnd)}</td>
+            </tr>
+            <tr>
+              <th>작업장소·장치</th>
+              <td colSpan={3}>작업지역: {info.workLocation}{info.equipmentNo ? ` / 장치: ${info.equipmentNo}` : ''}</td>
+            </tr>
+            <tr>
+              <th>작업개요</th>
+              <td colSpan={3}>[{t.label}] {info.workName} — {info.workContent}</td>
+            </tr>
+          </tbody></table>
+          <p className="muted" style={{ fontSize: 11, margin: '10px 0' }}>
+            ※ {t.label}작업 종류별 안전조치 요구사항 · 가스농도/측정 · 관련 작업허가 체크 · 모든 서명란은
+            회사 양식(.xlsx) 별지에서 <b>현장 직접 작성·서명</b>합니다(앱 미입력).
+          </p>
+          <div className="sec">서명 <span className="muted">(현장 수기)</span></div>
+          <table className="t small"><tbody>
+            <tr><th>신청자</th><td className="sign">(서명)</td><th>승인자</th><td className="sign">(서명)</td></tr>
+            <tr><th>안전조치 확인자</th><td className="sign">(서명)</td><th>작업부서책임자</th><td className="sign">(서명)</td></tr>
+          </tbody></table>
+        </section>
+      ))}
+
+      {/* 필수문서 (1C-2) */}
       {docs && (docs.pledges ?? []).map((pl: any, i: number) => (
         <section key={`pledge-${i}`} className="permit-page">
           <h1 className="title">공사 안전준수 서약서</h1>
