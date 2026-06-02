@@ -26,6 +26,7 @@ function fmtDateTime(iso: string): string {
 export default function MyWorkPermits() {
   const router = useRouter();
   const [name, setName] = useState('');
+  const [birthDate, setBirthDate] = useState('');
   const [phone, setPhone] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -37,8 +38,8 @@ export default function MyWorkPermits() {
 
   const search = async () => {
     setError('');
-    if (!name.trim() || phone.length < 10) {
-      setError('이름과 연락처를 정확히 입력해 주세요.');
+    if (!name.trim() || !birthDate || phone.length < 10) {
+      setError('이름·생년월일·연락처를 정확히 입력해 주세요.');
       return;
     }
     setLoading(true);
@@ -46,7 +47,7 @@ export default function MyWorkPermits() {
       const res = await fetch('/api/work-permits/my-list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, phone, dateFrom, dateTo }),
+        body: JSON.stringify({ name, birthDate, phone, dateFrom, dateTo }),
       });
       const json = await res.json();
       if (!json.success) {
@@ -71,7 +72,7 @@ export default function MyWorkPermits() {
       <header>
         <h1 className="text-2xl font-bold text-slate-800">내 작업허가 신청내역</h1>
         <p className="mt-1 text-sm text-slate-500">
-          신청 시 입력한 <b>이름·연락처</b>로 본인이 신청한 허가서를 조회합니다.
+          신청 시 입력한 <b>이름·생년월일·연락처</b>로 본인이 신청한 허가서를 조회합니다.
         </p>
       </header>
 
@@ -79,6 +80,10 @@ export default function MyWorkPermits() {
         <div>
           <label className="label">성명</label>
           <input className="input-base" value={name} onChange={(e) => setName(e.target.value)} placeholder="홍길동" />
+        </div>
+        <div>
+          <label className="label">생년월일</label>
+          <input type="date" className="input-base" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
         </div>
         <div>
           <label className="label">연락처 (숫자만)</label>
@@ -167,7 +172,7 @@ export default function MyWorkPermits() {
           {items.length === 0 && (
             <div className="card text-center text-slate-500 py-8">
               조회된 신청내역이 없습니다.<br />
-              <span className="text-xs">신청 시 입력한 이름·연락처와 동일해야 조회됩니다.</span>
+              <span className="text-xs">신청 시 입력한 이름·생년월일·연락처와 동일해야 조회됩니다.</span>
             </div>
           )}
         </div>
