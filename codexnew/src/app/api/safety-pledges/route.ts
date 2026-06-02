@@ -5,9 +5,6 @@ import { sixMonthsLater } from '@/lib/safety-doc-status';
 
 /**
  * POST /api/safety-pledges  (공개) — 개인 안전준수 서약(#8) 발급
- * req: { name, birthDate, phone, companyId, nationality, bloodType, jobType }
- * - 6개월 유효(issued + 6개월). 서명은 현장(앱 미입력).
- * - 발급 시 company_name 스냅샷.
  */
 export async function POST(req: Request) {
   try {
@@ -20,6 +17,11 @@ export async function POST(req: Request) {
     const nationality = (typeof body.nationality === 'string' ? body.nationality : '').trim() || null;
     const bloodType = (typeof body.bloodType === 'string' ? body.bloodType : '').trim() || null;
     const jobType = (typeof body.jobType === 'string' ? body.jobType : '').trim() || null;
+    // 디지털 서명(PNG data URL). 과대 입력 방지 300KB 한도.
+    let signature: string | null = typeof body.signature === 'string' ? body.signature : null;
+    if (signature && (!signature.startsWith('data:image/') || signature.length > 300_000)) {
+      signature = null;
+    }
 
     if (!name || !birthDate || phone.length < 10) {
       return NextResponse.json(
@@ -36,7 +38,6 @@ export async function POST(req: Request) {
 
     const supabase = createServiceClient();
 
-    // 업체명 스냅샷
     let companyName: string | null = null;
     if (companyId) {
       const { data: c } = await supabase.from('companies').select('name').eq('id', companyId).maybeSingle();
@@ -57,6 +58,7 @@ export async function POST(req: Request) {
         nationality,
         blood_type: bloodType,
         job_type: jobType,
+        signature,
         issued_at: issuedAt,
         expires_at: expiresAt,
       })
