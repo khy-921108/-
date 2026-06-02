@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { evaluateParticipant } from '@/lib/participant-eligibility';
 import { generateWorkPermitNumber } from '@/lib/work-permit-number';
 import { SUPPLEMENTAL_KEYS } from '@/lib/work-permit-constants';
+import { evaluateRequiredDocs } from '@/lib/safety-doc-status';
 
 export const runtime = 'nodejs';
 
@@ -106,6 +107,40 @@ export async function POST(req: Request) {
           code: 'PARTICIPANT_NOT_ELIGIBLE',
           message: '교육이 작업일 기준 만료되었거나 수료 정보가 없는 참여자가 있습니다.',
           data: { invalid },
+        },
+        { status: 403 }
+      );
+    }
+
+    // ---- 3.5 필수서류(1C-2) 서버 재검증 (작업종료일 기준) ----
+    const docPersons = participantsIn.map((p: any) => ({
+      name: (p?.name ?? '').trim(),
+      birthDate: (p?.birthDate ?? '').trim(),
+      phone: (p?.phone ?? '').toString(),
+    }));
+    let docs;
+    try {
+      docs = await evaluateRequiredDocs(supabase, { companyId, participants: docPersons, workEnd });
+    } catch (e) {
+      console.error('[work-permits POST] docs check:', e);
+      return NextResponse.json(
+        { success: false, code: 'DOC_QUERY_FAILED', message: '필수서류 확인 중 오류가 발생했습니다.' },
+        { status: 500 }
+      );
+    }
+    if (!docs.allValid) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'DOCS_REQUIRED',
+          message: '필수서류(개인서약/업체이행각서)가 미비합니다. "필수서류 확인" 단계에서 작성 후 제출해 주세요.',
+          data: {
+            missing: {
+              pledges: docs.pledges.filter((p) => p.status !== 'VALID').map((p) => p.name),
+              undertaking: docs.undertaking.status === 'VALID' ? null : docs.undertaking.status,
+              undertakingMissingMembers: docs.undertaking.missingMembers,
+            },
+          },
         },
         { status: 403 }
       );
