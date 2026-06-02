@@ -40,6 +40,7 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
   const supp = data.supplemental ?? {};
   const left = GENERAL_SAFETY_MEASURES.filter((m) => m.side === 'L');
   const right = GENERAL_SAFETY_MEASURES.filter((m) => m.side === 'R');
+  const docs = data.docs ?? null;
 
   return (
     <main className="wp-print">
@@ -167,6 +168,62 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
           ))}
         </tbody></table>
       </section>
+
+      {/* 필수문서 (1C-2) */}
+      {docs && (docs.pledges ?? []).map((pl: any, i: number) => (
+        <section key={`pledge-${i}`} className="permit-page">
+          <h1 className="title">공사 안전준수 서약서</h1>
+          <table className="t"><tbody>
+            <tr><th>성명</th><td>{pl.name}</td><th>업체명</th><td>{pl.companyName ?? ''}</td></tr>
+            <tr><th>생년월일</th><td>{pl.birthDate ?? ''}</td><th>국적</th><td>{pl.nationality ?? ''}</td></tr>
+            <tr><th>전화번호</th><td>{pl.phone ?? ''}</td><th>혈액형</th><td>{pl.bloodType ?? ''}</td></tr>
+            <tr><th>직종</th><td>{pl.jobType ?? ''}</td><th>출입일자</th><td>{pl.workDate ? fmtDate(pl.workDate) : ''}</td></tr>
+          </tbody></table>
+          <p className="muted" style={{ fontSize: 10, margin: '6px 0' }}>※ 안전준수 서약내용 13개 조항은 회사 양식(.xlsx) 출력본에 포함됩니다.</p>
+          <table className="t small"><tbody>
+            <tr><th style={{ width: '50%' }}>소속</th><th>서약자 (서명)</th></tr>
+            <tr><td>{pl.companyName ?? ''}</td><td className="sign">{pl.name} (서명)</td></tr>
+          </tbody></table>
+        </section>
+      ))}
+
+      {docs && docs.undertaking && (
+        <section className="permit-page">
+          <h1 className="title">안전작업 이행각서 (업체)</h1>
+          <table className="t"><tbody>
+            <tr><th>소속사명</th><td>{docs.undertaking.companyName ?? ''}</td></tr>
+            <tr><th>작업구역</th><td>{docs.undertaking.workArea ?? ''}</td></tr>
+            <tr><th>출입기간</th><td>{docs.undertaking.issuedAt ? `${fmtDate(docs.undertaking.issuedAt)} ~ ${fmtDate(docs.undertaking.expiresAt)}` : ''}</td></tr>
+            <tr><th>관리감독자</th><td>{docs.undertaking.managerName ?? ''} {docs.undertaking.managerPhone ? `/ ${docs.undertaking.managerPhone}` : ''}</td></tr>
+          </tbody></table>
+          <div className="sec">커버 명단</div>
+          <table className="t small"><tbody>
+            <tr><th>No</th><th>성명</th><th>생년월일</th><th>연락처</th><th>서명</th></tr>
+            {(docs.undertaking.members ?? []).map((m: any, i: number) => (
+              <tr key={i}><td>{i + 1}</td><td>{m.name}</td><td>{m.birthDate ?? ''}</td><td>{m.phone ?? ''}</td><td className="sign">(서명)</td></tr>
+            ))}
+          </tbody></table>
+          <p className="muted" style={{ fontSize: 10, marginTop: 6 }}>소속사 대표 / 현장소장: <span className="sign">(인)</span> — 현장 날인</p>
+        </section>
+      )}
+
+      {docs && docs.eduResult && (docs.eduResult.names ?? []).length > 0 && (
+        <section className="permit-page">
+          <h1 className="title">안전 교육 / 훈련 결과서</h1>
+          <table className="t"><tbody>
+            <tr><th>교육 일시</th><td>{docs.eduResult.date ? fmtDate(docs.eduResult.date) : ''}</td></tr>
+            <tr><th>교육 내용</th><td>{docs.eduResult.content}</td></tr>
+          </tbody></table>
+          <div className="sec">교육 대상자</div>
+          <table className="t small"><tbody>
+            <tr><th>No</th><th>성명</th><th>서명</th></tr>
+            {docs.eduResult.names.map((nm: string, i: number) => (
+              <tr key={i}><td>{i + 1}</td><td>{nm}</td><td className="sign">(서명)</td></tr>
+            ))}
+          </tbody></table>
+          <p className="muted" style={{ fontSize: 10, marginTop: 6 }}>교육 실시자: <span className="sign">(서명)</span> — 현장</p>
+        </section>
+      )}
 
       <style jsx global>{`
         @page { size: A4; margin: 10mm; }
