@@ -3,6 +3,12 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { readDraft, type WpParticipant } from '@/lib/work-permit-draft';
+import {
+  PLEDGE_INTRO,
+  PLEDGE_CLAUSES,
+  UNDERTAKING_INTRO,
+  UNDERTAKING_CLAUSES,
+} from '@/lib/work-permit-constants';
 
 interface PledgeStatus {
   name: string;
@@ -36,15 +42,15 @@ export default function WorkPermitDocs() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // 개인서약 인라인 입력 (참여자 index별)
   const [pForm, setPForm] = useState<Record<number, { nationality: string; bloodType: string; jobType: string }>>({});
   const [pBusy, setPBusy] = useState<Record<number, boolean>>({});
+  const [pConfirm, setPConfirm] = useState<Record<number, boolean>>({});
 
-  // 이행각서 인라인 입력
   const [uManager, setUManager] = useState('');
   const [uPhone, setUPhone] = useState('');
   const [uArea, setUArea] = useState('');
   const [uBusy, setUBusy] = useState(false);
+  const [uConfirm, setUConfirm] = useState(false);
 
   const loadStatus = useCallback(async (cid: string, we: string, ps: WpParticipant[]) => {
     setLoading(true);
@@ -67,7 +73,6 @@ export default function WorkPermitDocs() {
       setPledges(json.data.pledges);
       setUndertaking(json.data.undertaking);
       setAllValid(json.data.allValid);
-      // 미보유 개인서약 폼 프리필
       setPForm((prev) => {
         const next = { ...prev };
         json.data.pledges.forEach((pl: PledgeStatus, i: number) => {
@@ -81,7 +86,6 @@ export default function WorkPermitDocs() {
         });
         return next;
       });
-      // 이행각서 프리필
       if (json.data.undertaking?.status !== 'VALID') {
         setUManager((m) => m || json.data.undertaking?.managerName || '');
         setUArea((a) => a || json.data.undertaking?.workArea || '');
@@ -114,6 +118,10 @@ export default function WorkPermitDocs() {
       setError(`${p.name} 님의 국적·혈액형·직종을 모두 입력해 주세요.`);
       return;
     }
+    if (!pConfirm[i]) {
+      setError(`${p.name} 님의 안전준수 서약 내용 확인에 동의해 주세요.`);
+      return;
+    }
     setPBusy((b) => ({ ...b, [i]: true }));
     setError('');
     try {
@@ -142,6 +150,10 @@ export default function WorkPermitDocs() {
   const issueUndertaking = async () => {
     if (!uManager.trim()) {
       setError('관리감독자명을 입력해 주세요.');
+      return;
+    }
+    if (!uConfirm) {
+      setError('이행각서 내용 확인에 동의해 주세요.');
       return;
     }
     setUBusy(true);
@@ -189,7 +201,6 @@ export default function WorkPermitDocs() {
         <div className="card text-center text-slate-500 py-6">확인 중...</div>
       ) : (
         <>
-          {/* 개인서약 */}
           <section className="space-y-2">
             <h2 className="text-sm font-bold text-slate-700">① 개인 안전준수 서약 (참여자별)</h2>
             {participants.map((p, i) => {
@@ -210,35 +221,35 @@ export default function WorkPermitDocs() {
                     <div className="space-y-2 pt-1">
                       <div>
                         <label className="label">국적</label>
-                        <select
-                          className="input-base"
-                          value={form.nationality}
-                          onChange={(e) => setPForm((f) => ({ ...f, [i]: { ...form, nationality: e.target.value } }))}
-                        >
+                        <select className="input-base" value={form.nationality} onChange={(e) => setPForm((f) => ({ ...f, [i]: { ...form, nationality: e.target.value } }))}>
                           {NATIONALITIES.map((n) => <option key={n} value={n}>{n}</option>)}
                         </select>
                       </div>
                       <div>
                         <label className="label">혈액형</label>
-                        <select
-                          className="input-base"
-                          value={form.bloodType}
-                          onChange={(e) => setPForm((f) => ({ ...f, [i]: { ...form, bloodType: e.target.value } }))}
-                        >
+                        <select className="input-base" value={form.bloodType} onChange={(e) => setPForm((f) => ({ ...f, [i]: { ...form, bloodType: e.target.value } }))}>
                           {BLOOD_TYPES.map((b) => <option key={b} value={b}>{b}</option>)}
                         </select>
                       </div>
                       <div>
                         <label className="label">직종</label>
-                        <input
-                          className="input-base"
-                          value={form.jobType}
-                          onChange={(e) => setPForm((f) => ({ ...f, [i]: { ...form, jobType: e.target.value } }))}
-                          placeholder="예: 배관, 용접, 전기"
-                        />
+                        <input className="input-base" value={form.jobType} onChange={(e) => setPForm((f) => ({ ...f, [i]: { ...form, jobType: e.target.value } }))} placeholder="예: 배관, 용접, 전기" />
                       </div>
-                      <button type="button" onClick={() => issuePledge(i)} disabled={pBusy[i]} className="btn-primary">
-                        {pBusy[i] ? '발급 중...' : '서약서 발급 (6개월)'}
+                      <div>
+                        <label className="label">안전준수 서약 내용 (아래로 스크롤하여 확인)</label>
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 max-h-48 overflow-y-auto text-xs leading-relaxed text-slate-700">
+                          <p className="mb-2">{PLEDGE_INTRO}</p>
+                          <ol className="list-decimal pl-4 space-y-1">
+                            {PLEDGE_CLAUSES.map((c, ci) => <li key={ci}>{c}</li>)}
+                          </ol>
+                        </div>
+                        <label className="mt-2 flex items-start gap-2 text-sm text-slate-700">
+                          <input type="checkbox" className="mt-0.5" checked={!!pConfirm[i]} onChange={(e) => setPConfirm((c) => ({ ...c, [i]: e.target.checked }))} />
+                          <span>위 안전준수 서약 내용을 모두 확인하였으며 이에 동의합니다. (서명은 출력물에서 현장 진행)</span>
+                        </label>
+                      </div>
+                      <button type="button" onClick={() => issuePledge(i)} disabled={pBusy[i] || !pConfirm[i]} className="btn-primary">
+                        {pBusy[i] ? '발급 중...' : '확인 완료 · 서약서 발급 (6개월)'}
                       </button>
                     </div>
                   )}
@@ -247,7 +258,6 @@ export default function WorkPermitDocs() {
             })}
           </section>
 
-          {/* 이행각서 */}
           <section className="space-y-2">
             <h2 className="text-sm font-bold text-slate-700">② 업체 안전작업 이행각서 ({companyName})</h2>
             <div className="card space-y-2">
@@ -277,15 +287,27 @@ export default function WorkPermitDocs() {
                     <input className="input-base" value={uArea} onChange={(e) => setUArea(e.target.value)} placeholder="예: 울산공장 구내 작업" />
                   </div>
                   <p className="text-xs text-slate-500">※ 명단 = 이번 작업 참여자 {participants.length}명(+기존 명단 누적). 대표/현장소장 인은 현장.</p>
-                  <button type="button" onClick={issueUndertaking} disabled={uBusy} className="btn-primary">
-                    {uBusy ? '발급 중...' : '이행각서 발급 (6개월)'}
+                  <div>
+                    <label className="label">이행각서 내용 (아래로 스크롤하여 확인)</label>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 max-h-48 overflow-y-auto text-xs leading-relaxed text-slate-700">
+                      <p className="mb-2">{UNDERTAKING_INTRO}</p>
+                      <ol className="list-decimal pl-4 space-y-1">
+                        {UNDERTAKING_CLAUSES.map((c, ci) => <li key={ci}>{c}</li>)}
+                      </ol>
+                    </div>
+                    <label className="mt-2 flex items-start gap-2 text-sm text-slate-700">
+                      <input type="checkbox" className="mt-0.5" checked={uConfirm} onChange={(e) => setUConfirm(e.target.checked)} />
+                      <span>위 이행각서 내용을 모두 확인하였으며 이에 동의합니다. (대표/현장소장 인은 현장 날인)</span>
+                    </label>
+                  </div>
+                  <button type="button" onClick={issueUndertaking} disabled={uBusy || !uConfirm} className="btn-primary">
+                    {uBusy ? '발급 중...' : '확인 완료 · 이행각서 발급 (6개월)'}
                   </button>
                 </>
               )}
             </div>
           </section>
 
-          {/* 교육결과서 안내 */}
           <section className="space-y-2">
             <h2 className="text-sm font-bold text-slate-700">③ 교육훈련결과서</h2>
             <div className="card text-xs text-slate-500">
@@ -297,14 +319,7 @@ export default function WorkPermitDocs() {
 
           <div className="flex gap-2">
             <button type="button" onClick={() => router.push('/work-permit/participants')} className="btn-secondary">이전</button>
-            <button
-              type="button"
-              onClick={() => router.push('/work-permit/confirm')}
-              disabled={!allValid}
-              className="btn-primary"
-            >
-              다음
-            </button>
+            <button type="button" onClick={() => router.push('/work-permit/confirm')} disabled={!allValid} className="btn-primary">다음</button>
           </div>
           {!allValid && !loading && (
             <p className="text-xs text-center text-slate-400">필수서류(개인서약 전원 + 업체 이행각서)가 모두 유효해야 다음으로 진행됩니다.</p>
