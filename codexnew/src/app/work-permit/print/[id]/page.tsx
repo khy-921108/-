@@ -44,13 +44,11 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
 
   return (
     <main className="wp-print">
-      {/* 화면 전용 버튼 */}
       <div className="no-print mb-4 flex gap-2">
         <button onClick={() => window.print()} className="btn-primary">🖨 인쇄</button>
         <a href={`/api/work-permits/${params.id}/xlsx`} className="btn-secondary text-center">📥 회사 양식 .xlsx</a>
       </div>
 
-      {/* 페이지 1 — 일반위험작업허가서 */}
       <section className="permit-page">
         <h1 className="title">일반위험작업 허가서</h1>
         <table className="t">
@@ -126,7 +124,6 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
         </tbody></table>
       </section>
 
-      {/* 페이지 2 — TBM */}
       <section className="permit-page">
         <h1 className="title">작업 전 안전미팅 (TBM)</h1>
         <table className="t"><tbody>
@@ -169,7 +166,6 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
         </tbody></table>
       </section>
 
-      {/* 필수문서 (1C-2) */}
       {docs && (docs.pledges ?? []).map((pl: any, i: number) => (
         <section key={`pledge-${i}`} className="permit-page">
           <h1 className="title">공사 안전준수 서약서</h1>
@@ -182,7 +178,14 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
           <p className="muted" style={{ fontSize: 10, margin: '6px 0' }}>※ 안전준수 서약내용 13개 조항은 회사 양식(.xlsx) 출력본에 포함됩니다.</p>
           <table className="t small"><tbody>
             <tr><th style={{ width: '50%' }}>소속</th><th>서약자 (서명)</th></tr>
-            <tr><td>{pl.companyName ?? ''}</td><td className="sign">{pl.name} (서명)</td></tr>
+            <tr>
+              <td>{pl.companyName ?? ''}</td>
+              <td>
+                {pl.signature
+                  ? <img src={pl.signature} alt="서명" style={{ height: 40, maxWidth: 160 }} />
+                  : <span className="sign">{pl.name} (서명)</span>}
+              </td>
+            </tr>
           </tbody></table>
         </section>
       ))}
