@@ -22,6 +22,7 @@ export async function POST(req: Request) {
     const applicantName = (info.applicantName ?? '').trim();
     const applicantPhone = (info.applicantPhone ?? '').replace(/[^0-9]/g, '');
     const applicantTitle = (info.applicantTitle ?? '').trim() || null;
+    const applicantBirthDate = (info.applicantBirthDate ?? '').trim() || null;
     const equipmentNo = (info.equipmentNo ?? '').trim() || null;
     const workStart = info.workStart;
     const workEnd = info.workEnd;
@@ -148,6 +149,7 @@ export async function POST(req: Request) {
           applicant_name: applicantName,
           applicant_phone: applicantPhone,
           applicant_title: applicantTitle,
+          applicant_birth_date: applicantBirthDate,
           equipment_no: equipmentNo,
           tbm,
           supplemental,
