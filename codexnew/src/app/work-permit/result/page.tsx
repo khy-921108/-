@@ -14,6 +14,7 @@ interface WpResult {
 export default function WorkPermitResult() {
   const router = useRouter();
   const [result, setResult] = useState<WpResult | null>(null);
+  const [sig, setSig] = useState<{ total: number; signed: number; unsigned: string[] } | null>(null);
 
   useEffect(() => {
     const raw = sessionStorage.getItem('wpResult');
@@ -21,11 +22,26 @@ export default function WorkPermitResult() {
       router.replace('/work-permit');
       return;
     }
+    let parsed: WpResult;
     try {
-      setResult(JSON.parse(raw));
+      parsed = JSON.parse(raw);
+      setResult(parsed);
     } catch {
       router.replace('/work-permit');
+      return;
     }
+    // 서명 완료/미완료 집계 (개인서약 기준)
+    (async () => {
+      try {
+        const res = await fetch(`/api/work-permits/${parsed.permitId}`);
+        const json = await res.json();
+        const pledges = json?.data?.docs?.pledges ?? [];
+        if (Array.isArray(pledges) && pledges.length > 0) {
+          const unsigned = pledges.filter((p: any) => !p.signature).map((p: any) => p.name);
+          setSig({ total: pledges.length, signed: pledges.length - unsigned.length, unsigned });
+        }
+      } catch { /* 무시 */ }
+    })();
   }, [router]);
 
   if (!result) return null;
@@ -41,6 +57,21 @@ export default function WorkPermitResult() {
           <p className="text-2xl font-extrabold text-brand tracking-wider">{result.permitNumber}</p>
         </div>
       </div>
+
+      {sig && (
+        sig.unsigned.length === 0 ? (
+          <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-700">
+            ✅ 참여자 개인서약 서명 완료 ({sig.signed}/{sig.total}명)
+          </div>
+        ) : (
+          <div className="rounded-xl bg-amber-50 border border-amber-300 p-3 text-sm text-amber-800 space-y-2">
+            <p>⚠️ 개인서약 <b>서명 미완료 {sig.unsigned.length}명</b> ({sig.signed}/{sig.total} 완료)</p>
+            <p className="text-xs">미서명: {sig.unsigned.join(', ')}</p>
+            <p className="text-xs">※ 작업 시작 전까지 본인이 <b>'내 서약 서명'</b>에서 서명해야 합니다.</p>
+            <Link href="/work-permit/sign" className="inline-block text-xs font-bold text-amber-800 underline">→ 내 서약 서명 바로가기</Link>
+          </div>
+        )
+      )}
 
       <div className="space-y-3">
         <Link href={`/work-permit/print/${result.permitId}`} className="btn-primary block text-center">
