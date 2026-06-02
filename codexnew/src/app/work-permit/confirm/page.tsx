@@ -42,6 +42,7 @@ export default function WorkPermitConfirm() {
           info: {
             ...draft.info,
             applicantPhone: draft.applicant!.phone,
+            applicantBirthDate: draft.applicant!.birthDate,
           },
           supplemental: draft.supplemental ?? {},
           participants: (draft.participants ?? []).map((p) => ({
