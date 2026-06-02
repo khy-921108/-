@@ -14,9 +14,30 @@
 import path from 'path';
 import ExcelJS from 'exceljs';
 import { SUPPLEMENTAL_WORKS } from './work-permit-constants';
+import type { DocsOutput } from './safety-doc-status';
 
 export const SHEET_GENERAL = '2_일반위험작업허가서';
 export const SHEET_TBM = '1_TBM(작업전안전미팅)';
+export const SHEET_PLEDGE = '8_안전준수서약(개인)';
+export const SHEET_UNDERTAKING = '9_안전작업이행각서(업체)';
+export const SHEET_EDU = '7_교육훈련결과서';
+
+/** 1C-2 필수문서 시트 셀 매핑 */
+export const DOC_CELLS = {
+  pledge: {
+    name: 'B3', companyName: 'D3', birth: 'B4', nationality: 'D4',
+    phone: 'B5', bloodType: 'D5', jobType: 'B6', workDate: 'D6',
+  },
+  undertaking: {
+    company: 'A3', area: 'A4', period: 'A5', manager: 'A6',
+    memberRowStart: 8, memberRowEnd: 17, // 10행: 성명 B / 생년월일 C / 연락처 D
+  },
+  edu: {
+    datetime: 'A2', content: 'A4',
+    leftRowStart: 8, leftRowEnd: 31, // 성명 B (1~24)
+    rightRowStart: 8, rightRowEnd: 31, // 성명 E (25~48)
+  },
+} as const;
 
 /** 셀 매핑 — 라벨/양식 변경 시 이 상수만 수정 */
 export const TEMPLATE_CELLS = {
@@ -62,6 +83,7 @@ export interface PermitDocData {
   }[];
   note?: string | null;
   createdAt: string; // ISO
+  docs?: DocsOutput; // 1C-2 필수문서(있으면 시트 8 N장·9·7 채움)
 }
 
 // ===== KST 포맷터 (ICU 비의존: UTC+9 수동) =====
@@ -118,6 +140,121 @@ function applySupplementalChecks(
 }
 
 const TEMPLATE_PATH = path.join(process.cwd(), 'src', 'lib', 'templates', 'work-permit-template.xlsx');
+
+function birthFront(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return String(iso);
+  return `${m[1].slice(2)}${m[2]}${m[3]}`; // YYMMDD
+}
+
+/**
+ * 워크시트 깊은 복제 — ExcelJS는 자동복사 안 됨 → 열폭·행높이·셀값·스타일·병합 명시 복사.
+ */
+function cloneWorksheet(wb: ExcelJS.Workbook, source: ExcelJS.Worksheet, newName: string): ExcelJS.Worksheet {
+  const dst = wb.addWorksheet(newName, {
+    properties: { ...(source.properties as any) },
+    pageSetup: { ...(source.pageSetup as any) },
+  });
+  // 열 너비
+  const colCount = source.columnCount;
+  for (let c = 1; c <= colCount; c++) {
+    const w = source.getColumn(c).width;
+    if (w) dst.getColumn(c).width = w;
+  }
+  // 행/셀 (값 + 스타일 + 높이)
+  source.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+    const dRow = dst.getRow(rowNumber);
+    if (row.height) dRow.height = row.height;
+    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      const dCell = dRow.getCell(colNumber);
+      dCell.value = cell.value as any;
+      if (cell.style) {
+        try { dCell.style = JSON.parse(JSON.stringify(cell.style)); } catch { /* */ }
+      }
+    });
+  });
+  // 병합셀
+  const merges: string[] = ((source.model as any)?.merges) || [];
+  for (const m of merges) {
+    try { dst.mergeCells(m); } catch { /* 이미 병합 */ }
+  }
+  return dst;
+}
+
+/** 개인서약 1장 채움 (anchor 셀만, 서명 빈칸) */
+function fillPledgeSheet(ws: ExcelJS.Worksheet, p: DocsOutput['pledges'][number]) {
+  const C = DOC_CELLS.pledge;
+  ws.getCell(C.name).value = p.name;
+  ws.getCell(C.companyName).value = p.companyName ?? '';
+  ws.getCell(C.birth).value = birthFront(p.birthDate);
+  ws.getCell(C.nationality).value = p.nationality ?? ''; // 프리필 덮어쓰기
+  ws.getCell(C.phone).value = p.phone ?? '';
+  ws.getCell(C.bloodType).value = p.bloodType ?? '';     // 프리필 '형' 덮어쓰기
+  ws.getCell(C.jobType).value = p.jobType ?? '';
+  ws.getCell(C.workDate).value = p.workDate ? fmtDate(p.workDate) : '';
+  // 하단 서명(A24) 미변경 — 현장 수기
+}
+
+/** 이행각서 1장 채움 */
+function fillUndertakingSheet(ws: ExcelJS.Worksheet, u: NonNullable<DocsOutput['undertaking']>) {
+  const C = DOC_CELLS.undertaking;
+  ws.getCell(C.company).value = `◎ 소속사명 : ${u.companyName ?? ''}`;
+  ws.getCell(C.area).value = `◎ 작업구역 : ${u.workArea ?? ''}`;
+  const period =
+    u.issuedAt && u.expiresAt ? `${fmtDate(u.issuedAt)} ~ ${fmtDate(u.expiresAt)}` : '';
+  ws.getCell(C.period).value = `◎ 출입기간 : ${period}`;
+  ws.getCell(C.manager).value = `◎ 관리감독자 : ${u.managerName ?? ''}        연락처 : ${u.managerPhone ?? ''}`;
+  const cap = C.memberRowEnd - C.memberRowStart + 1; // 10
+  u.members.slice(0, cap).forEach((m, i) => {
+    const r = C.memberRowStart + i;
+    ws.getCell(`B${r}`).value = m.name ?? '';
+    ws.getCell(`C${r}`).value = birthFront(m.birthDate);
+    ws.getCell(`D${r}`).value = m.phone ?? '';
+    // 서명 E / 비고 F 빈칸
+  });
+  // 대표/현장소장 인(A29) 미변경 — 현장
+}
+
+/** 교육결과서 1장 채움 */
+function fillEduSheet(ws: ExcelJS.Worksheet, e: DocsOutput['eduResult']) {
+  const C = DOC_CELLS.edu;
+  ws.getCell(C.datetime).value = `1. 교육 일시 : ${e.date ? fmtDate(e.date) : ''}`;
+  ws.getCell(C.content).value = `2. 교육 내용 : ${e.content ?? ''}`;
+  const leftCap = C.leftRowEnd - C.leftRowStart + 1; // 24
+  e.names.forEach((nm, i) => {
+    if (i < leftCap) {
+      ws.getCell(`B${C.leftRowStart + i}`).value = nm;
+    } else {
+      const idx = i - leftCap;
+      if (idx < (C.rightRowEnd - C.rightRowStart + 1)) {
+        ws.getCell(`E${C.rightRowStart + idx}`).value = nm;
+      }
+    }
+    // 서명 빈칸
+  });
+  // 실시자(A32) 미변경 — 현장
+}
+
+/** 필수문서 시트 채움: 개인서약 N장(시트 복제) + 이행각서 1장 + 교육결과서 1장 */
+function fillDocSheets(wb: ExcelJS.Workbook, docs: DocsOutput) {
+  // 개인서약: 원본 시트를 1번 참여자용으로 쓰고, 2번부터는 복제
+  const pledgeSrc = wb.getWorksheet(SHEET_PLEDGE);
+  if (pledgeSrc && docs.pledges.length > 0) {
+    pledgeSrc.name = `${SHEET_PLEDGE}(1)`;
+    fillPledgeSheet(pledgeSrc, docs.pledges[0]);
+    for (let i = 1; i < docs.pledges.length; i++) {
+      const clone = cloneWorksheet(wb, pledgeSrc, `${SHEET_PLEDGE}(${i + 1})`);
+      fillPledgeSheet(clone, docs.pledges[i]);
+    }
+  }
+  // 이행각서
+  const us = wb.getWorksheet(SHEET_UNDERTAKING);
+  if (us && docs.undertaking) fillUndertakingSheet(us, docs.undertaking);
+  // 교육결과서
+  const es = wb.getWorksheet(SHEET_EDU);
+  if (es) fillEduSheet(es, docs.eduResult);
+}
 
 /**
  * 작업허가서 양식을 채워 xlsx 버퍼를 반환.
@@ -201,6 +338,11 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
   if (overflow.length > 0) etcParts.push(`추가 참여자: ${overflow.join(', ')}`);
   if (etcParts.length > 0) {
     setCell(gs, G.etc, etcParts.join(' / '), true);
+  }
+
+  // ===== 1C-2 필수문서(있으면 채움) =====
+  if (data.docs) {
+    fillDocSheets(wb, data.docs);
   }
 
   const buf = await wb.xlsx.writeBuffer();
