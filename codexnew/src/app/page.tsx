@@ -44,6 +44,12 @@ export default function HomePage() {
         >
           📋 내 작업허가 조회
         </Link>
+        <Link
+          href="/work-permit/sign"
+          className="block w-full rounded-xl border-2 border-amber-500 bg-white px-5 py-4 text-base font-bold text-amber-700 transition active:scale-95 text-center"
+        >
+          ✍️ 내 서약 서명
+        </Link>
       </div>
 
       <p className="mt-10 text-xs text-slate-400">
