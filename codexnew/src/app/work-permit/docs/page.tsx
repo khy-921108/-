@@ -9,6 +9,7 @@ import {
   UNDERTAKING_INTRO,
   UNDERTAKING_CLAUSES,
 } from '@/lib/work-permit-constants';
+import SignaturePad from '@/components/SignaturePad';
 
 interface PledgeStatus {
   name: string;
@@ -45,6 +46,7 @@ export default function WorkPermitDocs() {
   const [pForm, setPForm] = useState<Record<number, { nationality: string; bloodType: string; jobType: string }>>({});
   const [pBusy, setPBusy] = useState<Record<number, boolean>>({});
   const [pConfirm, setPConfirm] = useState<Record<number, boolean>>({});
+  const [pSig, setPSig] = useState<Record<number, string>>({});
 
   const [uManager, setUManager] = useState('');
   const [uPhone, setUPhone] = useState('');
@@ -122,6 +124,10 @@ export default function WorkPermitDocs() {
       setError(`${p.name} 님의 안전준수 서약 내용 확인에 동의해 주세요.`);
       return;
     }
+    if (!pSig[i]) {
+      setError(`${p.name} 님의 서명을 입력해 주세요.`);
+      return;
+    }
     setPBusy((b) => ({ ...b, [i]: true }));
     setError('');
     try {
@@ -131,6 +137,7 @@ export default function WorkPermitDocs() {
         body: JSON.stringify({
           name: p.name, birthDate: p.birthDate, phone: p.phone, companyId,
           nationality: form.nationality, bloodType: form.bloodType, jobType: form.jobType.trim(),
+          signature: pSig[i],
         }),
       });
       const json = await res.json();
@@ -194,7 +201,7 @@ export default function WorkPermitDocs() {
         <p className="mt-1 text-sm text-slate-500">
           개인 안전준수 서약(참여자별) + 업체 안전작업 이행각서는 <b>6개월 유효</b>합니다. 미보유 시 작성하면 발급됩니다.
         </p>
-        <p className="mt-1 text-xs text-slate-400">※ 서명은 출력물에서 현장 수기로 진행합니다(앱 미입력).</p>
+        <p className="mt-1 text-xs text-slate-400">※ 본인 서명은 아래 서명란에 직접 입력합니다. 결재(발급/승인) 서명은 현장 진행.</p>
       </header>
 
       {loading ? (
@@ -245,10 +252,14 @@ export default function WorkPermitDocs() {
                         </div>
                         <label className="mt-2 flex items-start gap-2 text-sm text-slate-700">
                           <input type="checkbox" className="mt-0.5" checked={!!pConfirm[i]} onChange={(e) => setPConfirm((c) => ({ ...c, [i]: e.target.checked }))} />
-                          <span>위 안전준수 서약 내용을 모두 확인하였으며 이에 동의합니다. (서명은 출력물에서 현장 진행)</span>
+                          <span>위 안전준수 서약 내용을 모두 확인하였으며 이에 동의합니다.</span>
                         </label>
                       </div>
-                      <button type="button" onClick={() => issuePledge(i)} disabled={pBusy[i] || !pConfirm[i]} className="btn-primary">
+                      <div>
+                        <label className="label">본인 서명 (마우스 또는 손가락)</label>
+                        <SignaturePad onChange={(d) => setPSig((s) => ({ ...s, [i]: d }))} />
+                      </div>
+                      <button type="button" onClick={() => issuePledge(i)} disabled={pBusy[i] || !pConfirm[i] || !pSig[i]} className="btn-primary">
                         {pBusy[i] ? '발급 중...' : '확인 완료 · 서약서 발급 (6개월)'}
                       </button>
                     </div>
