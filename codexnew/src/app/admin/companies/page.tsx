@@ -38,8 +38,8 @@ interface Stats {
 }
 
 interface MemberItem {
-  id: string;
-  member_type: MemberType;
+  id: string | null;
+  member_type: MemberType | null;
   name: string;
   birth_date: string | null;
   phone: string | null;
@@ -48,7 +48,9 @@ interface MemberItem {
   equipment_type_etc: string | null;
   spec: string | null;
   note: string | null;
+  source: 'BOTH' | 'MASTER' | 'TRAINING';
   completion_status: 'VALID' | 'EXPIRING7' | 'EXPIRED' | 'NONE';
+  completed_at: string | null;
   expires_at: string | null;
 }
 
@@ -80,19 +82,30 @@ function completionBadge(status: MemberItem['completion_status']) {
     VALID: 'bg-emerald-100 text-emerald-700',
     EXPIRING7: 'bg-amber-100 text-amber-700',
     EXPIRED: 'bg-red-100 text-red-700',
-    NONE: 'bg-slate-100 text-slate-500',
+    NONE: 'bg-red-100 text-red-700', // 미이수도 빨강(작업 전 필수)
   };
   const label = {
     VALID: '유효',
-    EXPIRING7: '만료7일',
+    EXPIRING7: '만료예정',
     EXPIRED: '만료',
-    NONE: '수료없음',
+    NONE: '미이수',
   };
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold ${map[status]}`}>
       {label[status]}
     </span>
   );
+}
+
+/** 출처 태그: 마스터(명단)·교육·둘다 */
+function sourceTag(source: MemberItem['source']) {
+  const map = {
+    BOTH: { cls: 'bg-indigo-50 text-indigo-600', label: '명단+교육' },
+    MASTER: { cls: 'bg-slate-100 text-slate-500', label: '명단만' },
+    TRAINING: { cls: 'bg-sky-50 text-sky-600', label: '교육만' },
+  };
+  const m = map[source];
+  return <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${m.cls}`}>{m.label}</span>;
 }
 
 export default function AdminCompaniesPage() {
@@ -497,21 +510,25 @@ function MembersModal({
     equipmentCount: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [showImport, setShowImport] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/admin/companies/${company.id}/members`);
+      const json = await res.json();
+      if (json.success) {
+        setItems(json.data.items);
+        setStats(json.data.stats);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/admin/companies/${company.id}/members`);
-        const json = await res.json();
-        if (json.success) {
-          setItems(json.data.items);
-          setStats(json.data.stats);
-        }
-      } finally {
-        setLoading(false);
-      }
-    })();
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company.id]);
 
   return (
@@ -525,9 +542,10 @@ function MembersModal({
       >
         <div className="border-b border-slate-200 p-4 flex justify-between items-center">
           <div>
-            <h2 className="text-lg font-bold text-slate-800">{company.name} · 소속 인원</h2>
+            <h2 className="text-lg font-bold text-slate-800">{company.name} · 인원현황</h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              {companyTypeLabel(company.company_type)} · {companyStatusLabel(company.status)}
+              {companyTypeLabel(company.company_type)} · {companyStatusLabel(company.status)} · 총 {stats.total}명
+              <span className="text-slate-400"> (명단 ∪ 교육 통합)</span>
             </p>
           </div>
           <button
@@ -539,32 +557,58 @@ function MembersModal({
         </div>
 
         <div className="p-4 space-y-3">
+          {/* 교육상태 카운트 */}
           <div className="grid grid-cols-4 gap-2">
-            <StatCard label="총 인원" value={stats.total} />
             <StatCard label="유효" value={stats.valid} color="text-emerald-700" />
-            <StatCard label="만료7일" value={stats.expiring7} color="text-amber-700" />
-            <StatCard label="만료/없음" value={stats.expired + stats.none} color="text-slate-500" />
+            <StatCard label="만료예정" value={stats.expiring7} color="text-amber-700" />
+            <StatCard label="만료" value={stats.expired} color="text-red-600" />
+            <StatCard label="미이수" value={stats.none} color="text-red-600" />
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <StatCard label="차량 보유" value={stats.vehicleCount} />
-            <StatCard label="장비 보유" value={stats.equipmentCount} />
+
+          {/* 엑셀 다운로드 / 업로드 */}
+          <div className="flex gap-2">
+            <a
+              href={`/api/admin/companies/${company.id}/export`}
+              className="btn-secondary flex-1 text-center text-sm"
+            >
+              📥 엑셀 다운로드
+            </a>
+            <button
+              onClick={() => setShowImport((v) => !v)}
+              className="btn-secondary flex-1 text-sm"
+            >
+              📤 엑셀 업로드
+            </button>
           </div>
+
+          {showImport && (
+            <CompanyMemberImport
+              companyId={company.id}
+              onImported={async () => {
+                await load();
+              }}
+            />
+          )}
 
           {loading ? (
             <p className="text-center text-slate-500 py-6">조회 중...</p>
           ) : items.length === 0 ? (
-            <div className="card text-center text-slate-500 py-8">소속 인원이 없습니다.</div>
+            <div className="card text-center text-slate-500 py-8">
+              소속 인원이 없습니다.<br />
+              <span className="text-xs">이 업체로 교육 수료자나 명단(엑셀)이 등록되면 표시됩니다.</span>
+            </div>
           ) : (
             <ul className="space-y-1">
-              {items.map((m) => (
-                <li key={m.id} className="rounded-xl border border-slate-100 bg-white p-3">
+              {items.map((m, idx) => (
+                <li key={m.id ?? `t-${idx}`} className="rounded-xl border border-slate-100 bg-white p-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="font-bold text-slate-800 truncate">
                         {m.name}{' '}
                         <span className="text-xs font-normal text-slate-500">
-                          ({memberTypeLabel(m.member_type)})
-                        </span>
+                          ({m.member_type ? memberTypeLabel(m.member_type) : '작업자'})
+                        </span>{' '}
+                        {sourceTag(m.source)}
                       </p>
                       <p className="text-xs text-slate-600 mt-0.5">
                         {m.birth_date || '생년월일 미입력'} · {m.phone || '연락처 미입력'}
@@ -600,6 +644,138 @@ function MembersModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+interface MemberImportResp {
+  success: boolean;
+  code?: string;
+  message?: string;
+  data?: {
+    dryRun: boolean;
+    members: { count: number; rows: any[] } | { inserted: number; updated: number };
+    errors: { sheet: string; rowIndex: number; field?: string; message: string }[];
+    warnings: { sheet: string; rowIndex: number; message: string }[];
+  };
+}
+
+/** 업체 상세 내 인원 엑셀 업로드 (미리보기 → 오류확인 → 반영). 이 업체에만 반영. */
+function CompanyMemberImport({
+  companyId,
+  onImported,
+}: {
+  companyId: string;
+  onImported: () => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<MemberImportResp | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [committed, setCommitted] = useState(false);
+  const [err, setErr] = useState('');
+
+  const post = async (dryRun: boolean) => {
+    if (!file) {
+      setErr('파일을 선택해 주세요.');
+      return;
+    }
+    setErr('');
+    setLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch(
+        `/api/admin/companies/${companyId}/members/import${dryRun ? '?dryRun=1' : ''}`,
+        { method: 'POST', body: fd }
+      );
+      const json: MemberImportResp = await res.json();
+      setPreview(json);
+      if (!dryRun && json.success) {
+        setCommitted(true);
+        onImported();
+      } else if (!json.success && json.message) {
+        setErr(json.message);
+      }
+    } catch (e) {
+      console.error(e);
+      setErr('네트워크 오류');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const hasErrors = !!preview?.data?.errors?.length;
+  const previewReady = !!preview && !committed && preview.data?.dryRun;
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2 text-xs">
+      <p className="text-slate-500">
+        "엑셀 다운로드"로 받은 파일의 <b>인원</b> 시트를 수정해 업로드하세요. 이 업체 명단에만 반영됩니다.
+        (교육수료일·유효기간·상태 컬럼은 자동계산이라 무시됩니다.)
+      </p>
+      <input
+        type="file"
+        accept=".xlsx"
+        onChange={(e) => {
+          setFile(e.target.files?.[0] ?? null);
+          setPreview(null);
+          setCommitted(false);
+          setErr('');
+        }}
+        className="w-full text-xs"
+      />
+      <div className="flex gap-2">
+        <button onClick={() => post(true)} disabled={loading || !file} className="btn-secondary flex-1 text-xs">
+          {loading && !committed ? '검증 중...' : '🔍 검증(미리보기)'}
+        </button>
+        <button
+          onClick={() => post(false)}
+          disabled={loading || !previewReady || hasErrors}
+          className="btn-primary flex-1 text-xs"
+        >
+          {committed ? '✅ 반영 완료' : '⬆ 반영'}
+        </button>
+      </div>
+
+      {err && <div className="rounded bg-red-50 p-2 text-red-700">{err}</div>}
+
+      {preview?.data && (
+        <div className="rounded border border-slate-200 bg-white p-2 space-y-1">
+          {preview.data.dryRun ? (
+            <p className="text-slate-700">검증 대상 인원 {(preview.data.members as any).count}명</p>
+          ) : (
+            <p className="text-slate-700">
+              반영 — 신규 {(preview.data.members as any).inserted ?? 0} / 업데이트{' '}
+              {(preview.data.members as any).updated ?? 0}
+            </p>
+          )}
+          {preview.data.errors.length > 0 && (
+            <details open>
+              <summary className="font-bold text-red-700 cursor-pointer">오류 {preview.data.errors.length}건</summary>
+              <ul className="mt-1 space-y-0.5">
+                {preview.data.errors.slice(0, 20).map((e, i) => (
+                  <li key={i} className="text-red-700">
+                    [{e.rowIndex}행{e.field ? ` · ${e.field}` : ''}] {e.message}
+                  </li>
+                ))}
+                {preview.data.errors.length > 20 && (
+                  <li className="text-slate-500">... 외 {preview.data.errors.length - 20}건</li>
+                )}
+              </ul>
+            </details>
+          )}
+          {preview.data.warnings.length > 0 && (
+            <details>
+              <summary className="font-bold text-amber-700 cursor-pointer">경고 {preview.data.warnings.length}건</summary>
+              <ul className="mt-1 space-y-0.5">
+                {preview.data.warnings.slice(0, 20).map((w, i) => (
+                  <li key={i} className="text-amber-700">[{w.rowIndex}행] {w.message}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
     </div>
   );
 }
