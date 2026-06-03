@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getSettings } from '@/lib/settings';
 import { generateCompletionNumber } from '@/lib/completion-number';
+import { autoRegisterFromSession } from '@/lib/auto-roster';
 
 /**
  * POST /api/sessions/:id/complete
@@ -138,6 +139,14 @@ export async function POST(_req: Request, ctx: { params: { id: string } }) {
       .from('training_sessions')
       .update({ status: 'COMPLETED' })
       .eq('id', sessionId);
+
+    // 7. ① 자동 명단 등록 — 🔴 비차단. 실패해도 수료/수료증/응답에 영향 0.
+    //    (company_id 있을 때만 등록 / ON CONFLICT DO NOTHING / 노쇼는 여기 도달 안 함)
+    try {
+      await autoRegisterFromSession(supabase, sessionId);
+    } catch (e) {
+      console.error('[complete] auto-roster 무시(비차단):', e);
+    }
 
     return NextResponse.json({
       success: true,
