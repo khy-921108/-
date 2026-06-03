@@ -15,6 +15,12 @@ import {
   type EquipmentType,
   type MemberType,
 } from '@/lib/equipment';
+import {
+  DOC_CATEGORIES,
+  MAX_DOC_BYTES,
+  validateUpload,
+  type DocCategoryKey,
+} from '@/lib/company-documents';
 
 interface CompanyItem {
   id: string;
@@ -636,6 +642,9 @@ function MembersModal({
               ))}
             </ul>
           )}
+
+          {/* 📁 문서함 */}
+          <DocumentsSection companyId={company.id} />
         </div>
 
         <div className="border-t border-slate-200 p-4">
@@ -644,6 +653,266 @@ function MembersModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+interface DocItem {
+  id: string;
+  category: string;
+  categoryLabel: string;
+  fileName: string;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  note: string | null;
+  uploadedBy: string | null;
+  createdAt: string;
+}
+
+function fmtBytes(n: number | null): string {
+  if (!n || n <= 0) return '-';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+function fmtDateTimeKST(iso: string): string {
+  if (!iso) return '-';
+  const k = new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${k.getUTCFullYear()}.${p(k.getUTCMonth() + 1)}.${p(k.getUTCDate())} ${p(k.getUTCHours())}:${p(k.getUTCMinutes())}`;
+}
+
+/** signed upload URL 로 직접 PUT(진행률 XHR). storage-js 와 동일한 multipart 형식. */
+function putToSignedUrl(signedUrl: string, file: File, onProgress: (pct: number) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append('cacheControl', '3600');
+    form.append('', file);
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', signedUrl);
+    xhr.setRequestHeader('x-upsert', 'false'); // storage-js SDK 와 동일(신규 업로드)
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error(`업로드 실패 (HTTP ${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error('네트워크 오류'));
+    xhr.send(form);
+  });
+}
+
+/** 업체 상세 내 문서함: 카테고리 업로드(진행률) + 목록 + 다운로드 + 삭제 + 필터. */
+function DocumentsSection({ companyId }: { companyId: string }) {
+  const [items, setItems] = useState<DocItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<'' | DocCategoryKey>('');
+  const [upCategory, setUpCategory] = useState<DocCategoryKey>('roster');
+  const [note, setNote] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [pct, setPct] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const qs = filter ? `?category=${filter}` : '';
+      const res = await fetch(`/api/admin/companies/${companyId}/documents${qs}`);
+      const json = await res.json();
+      if (json.success) setItems(json.data.items);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, filter]);
+
+  const upload = async () => {
+    setErr('');
+    if (!file) {
+      setErr('파일을 선택해 주세요.');
+      return;
+    }
+    // 1차 클라 검증(서버가 최종 검증)
+    const v = validateUpload({ fileName: file.name, sizeBytes: file.size, mimeType: file.type });
+    if (!v.ok) {
+      setErr(v.message);
+      return;
+    }
+    setBusy(true);
+    setPct(0);
+    try {
+      // 1) signed upload URL
+      const r1 = await fetch(`/api/admin/companies/${companyId}/documents/upload-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, category: upCategory, sizeBytes: file.size, mimeType: file.type }),
+      });
+      const j1 = await r1.json();
+      if (!j1.success) {
+        setErr(j1.message || '업로드 URL 발급 실패');
+        return;
+      }
+      // 2) Storage 직접 PUT(진행률)
+      await putToSignedUrl(j1.data.signedUrl, file, setPct);
+      // 3) 메타 기록
+      const r2 = await fetch(`/api/admin/companies/${companyId}/documents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          category: upCategory,
+          fileName: file.name,
+          storagePath: j1.data.path,
+          mimeType: file.type,
+          sizeBytes: file.size,
+          note: note.trim() || undefined,
+        }),
+      });
+      const j2 = await r2.json();
+      if (!j2.success) {
+        setErr(j2.message || '문서 정보 저장 실패(업로드는 됨)');
+        return;
+      }
+      // 초기화 + 새로고침
+      setFile(null);
+      setNote('');
+      if (fileRef.current) fileRef.current.value = '';
+      await load();
+    } catch (e: any) {
+      console.error(e);
+      setErr(e?.message || '업로드 중 오류가 발생했습니다.');
+    } finally {
+      setBusy(false);
+      setPct(null);
+    }
+  };
+
+  const download = async (id: string) => {
+    try {
+      const res = await fetch(`/api/admin/companies/${companyId}/documents/${id}/download`);
+      const json = await res.json();
+      if (!json.success) {
+        alert(json.message || '다운로드 실패');
+        return;
+      }
+      window.location.href = json.data.url;
+    } catch {
+      alert('다운로드 중 오류');
+    }
+  };
+
+  const remove = async (id: string, name: string) => {
+    if (!confirm(`"${name}" 문서를 삭제할까요? (되돌릴 수 없습니다)`)) return;
+    try {
+      const res = await fetch(`/api/admin/companies/${companyId}/documents/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!json.success) {
+        alert(json.message || '삭제 실패');
+        return;
+      }
+      await load();
+    } catch {
+      alert('삭제 중 오류');
+    }
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-slate-200 space-y-3">
+      <h3 className="text-sm font-bold text-slate-700">📁 문서함</h3>
+
+      {/* 업로드 */}
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+        <div className="grid grid-cols-2 gap-2">
+          <select
+            className="input-base text-sm"
+            value={upCategory}
+            onChange={(e) => setUpCategory(e.target.value as DocCategoryKey)}
+          >
+            {DOC_CATEGORIES.map((c) => (
+              <option key={c.key} value={c.key}>{c.label}</option>
+            ))}
+          </select>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png,.xlsx,.docx,.hwp"
+            onChange={(e) => {
+              setFile(e.target.files?.[0] ?? null);
+              setErr('');
+            }}
+            className="text-xs"
+          />
+        </div>
+        <input
+          className="input-base text-sm"
+          placeholder="메모(선택)"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+        <p className="text-[11px] text-slate-400">
+          허용: pdf·jpg·png·xlsx·docx·hwp / 최대 {Math.round(MAX_DOC_BYTES / 1024 / 1024)}MB
+        </p>
+        {busy && pct !== null && (
+          <div className="h-2 w-full rounded bg-slate-200 overflow-hidden">
+            <div className="h-full bg-brand transition-all" style={{ width: `${pct}%` }} />
+          </div>
+        )}
+        {err && <div className="rounded bg-red-50 p-2 text-xs text-red-700">{err}</div>}
+        <button onClick={upload} disabled={busy || !file} className="btn-primary text-sm w-full">
+          {busy ? `업로드 중... ${pct ?? 0}%` : '⬆ 업로드'}
+        </button>
+      </div>
+
+      {/* 목록 필터 */}
+      <div className="flex items-center gap-2">
+        <select
+          className="input-base text-xs flex-1"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value as '' | DocCategoryKey)}
+        >
+          <option value="">전체 분류</option>
+          {DOC_CATEGORIES.map((c) => (
+            <option key={c.key} value={c.key}>{c.label}</option>
+          ))}
+        </select>
+        <span className="text-[11px] text-slate-400 shrink-0">{items.length}건</span>
+      </div>
+
+      {/* 목록 */}
+      {loading ? (
+        <p className="text-center text-slate-500 py-3 text-xs">불러오는 중...</p>
+      ) : items.length === 0 ? (
+        <p className="text-center text-slate-400 py-4 text-xs">등록된 문서가 없습니다.</p>
+      ) : (
+        <ul className="space-y-1">
+          {items.map((d) => (
+            <li key={d.id} className="rounded-lg border border-slate-100 p-2 flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-800 truncate">{d.fileName}</p>
+                <p className="text-[11px] text-slate-500">
+                  {d.categoryLabel} · {fmtBytes(d.sizeBytes)} · {fmtDateTimeKST(d.createdAt)}
+                  {d.uploadedBy ? ` · ${d.uploadedBy}` : ''}
+                </p>
+                {d.note && <p className="text-[11px] text-slate-400 truncate">메모: {d.note}</p>}
+              </div>
+              <div className="shrink-0 flex gap-2">
+                <button onClick={() => download(d.id)} className="text-xs font-bold text-brand hover:underline">
+                  📥
+                </button>
+                <button onClick={() => remove(d.id, d.fileName)} className="text-xs font-bold text-red-600 hover:underline">
+                  🗑
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
