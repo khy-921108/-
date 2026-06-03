@@ -10,6 +10,8 @@ import {
   type CompanyType,
 } from '@/lib/company';
 import {
+  EQUIPMENT_TYPES,
+  MEMBER_TYPES,
   equipmentTypeLabel,
   memberTypeLabel,
   type EquipmentType,
@@ -517,6 +519,7 @@ function MembersModal({
   });
   const [loading, setLoading] = useState(true);
   const [showImport, setShowImport] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -536,6 +539,21 @@ function MembersModal({
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company.id]);
+
+  const removeMember = async (memberId: string, name: string) => {
+    if (!confirm(`"${name}" 님을 이 업체 명단에서 삭제할까요?\n(교육 수료 기록은 그대로 유지됩니다)`)) return;
+    try {
+      const res = await fetch(`/api/admin/companies/${company.id}/members/${memberId}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!json.success) {
+        alert(json.message || '삭제 실패');
+        return;
+      }
+      await load();
+    } catch {
+      alert('삭제 중 오류');
+    }
+  };
 
   return (
     <div
@@ -587,10 +605,28 @@ function MembersModal({
             </button>
           </div>
 
+          {/* 인원 직접 추가 */}
+          <button
+            onClick={() => setShowAdd((v) => !v)}
+            className="btn-secondary w-full text-sm"
+          >
+            ➕ 인원 추가 (엑셀 없이)
+          </button>
+
           {showImport && (
             <CompanyMemberImport
               companyId={company.id}
               onImported={async () => {
+                await load();
+              }}
+            />
+          )}
+
+          {showAdd && (
+            <MemberAddForm
+              companyId={company.id}
+              onAdded={async () => {
+                setShowAdd(false);
                 await load();
               }}
             />
@@ -636,6 +672,15 @@ function MembersModal({
                           ~{m.expires_at.substring(0, 10)}
                         </p>
                       )}
+                      {m.id && (
+                        <button
+                          onClick={() => removeMember(m.id!, m.name)}
+                          className="block ml-auto text-[11px] font-bold text-red-600 hover:underline"
+                          title="명단에서 삭제(교육기록은 유지)"
+                        >
+                          🗑 삭제
+                        </button>
+                      )}
                     </div>
                   </div>
                 </li>
@@ -653,6 +698,153 @@ function MembersModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** 어드민 인원 직접 추가 폼 (엑셀 없이 한 명). */
+function MemberAddForm({
+  companyId,
+  onAdded,
+}: {
+  companyId: string;
+  onAdded: () => void;
+}) {
+  const [memberType, setMemberType] = useState<MemberType>('WORKER');
+  const [name, setName] = useState('');
+  const [birthDate, setBirthDate] = useState('');
+  const [phone, setPhone] = useState('');
+  const [vehicleNumber, setVehicleNumber] = useState('');
+  const [equipmentType, setEquipmentType] = useState<'' | EquipmentType>('');
+  const [equipmentTypeEtc, setEquipmentTypeEtc] = useState('');
+  const [spec, setSpec] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
+
+  const formatPhone = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 11);
+  const showVehicle = memberType === 'TRUCK' || memberType === 'HEAVY';
+
+  const submit = async () => {
+    setErr('');
+    setMsg('');
+    if (!name.trim()) {
+      setErr('이름을 입력해 주세요.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/admin/companies/${companyId}/members/add`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          birthDate: birthDate || undefined,
+          phone: phone || undefined,
+          memberType,
+          vehicleNumber: vehicleNumber || undefined,
+          equipmentType: equipmentType || undefined,
+          equipmentTypeEtc: equipmentTypeEtc || undefined,
+          spec: spec || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setErr(json.message || '추가 실패');
+        return;
+      }
+      if (json.data?.added) {
+        onAdded(); // 추가됨 → 폼 닫고 목록 갱신
+      } else {
+        setMsg(json.message || '이미 명단에 있는 인원입니다.');
+      }
+    } catch {
+      setErr('네트워크 오류');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+      <p className="text-xs font-bold text-slate-700">➕ 인원 직접 추가</p>
+      <div className="grid grid-cols-2 gap-2">
+        <select
+          className="input-base text-sm"
+          value={memberType}
+          onChange={(e) => setMemberType(e.target.value as MemberType)}
+        >
+          {MEMBER_TYPES.map((t) => (
+            <option key={t.code} value={t.code}>{t.label}</option>
+          ))}
+        </select>
+        <input
+          className="input-base text-sm"
+          placeholder="이름 *"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <input
+          type="date"
+          className="input-base text-sm"
+          value={birthDate}
+          onChange={(e) => setBirthDate(e.target.value)}
+          aria-label="생년월일"
+        />
+        <input
+          type="tel"
+          inputMode="numeric"
+          className="input-base text-sm"
+          placeholder="연락처(숫자만)"
+          value={phone}
+          onChange={(e) => setPhone(formatPhone(e.target.value))}
+        />
+      </div>
+
+      {showVehicle && (
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            className="input-base text-sm"
+            placeholder="차량번호"
+            value={vehicleNumber}
+            onChange={(e) => setVehicleNumber(e.target.value)}
+          />
+          <input
+            className="input-base text-sm"
+            placeholder="톤수/규격(예: 5톤)"
+            value={spec}
+            onChange={(e) => setSpec(e.target.value)}
+          />
+        </div>
+      )}
+      {memberType === 'HEAVY' && (
+        <div className="grid grid-cols-2 gap-2">
+          <select
+            className="input-base text-sm"
+            value={equipmentType}
+            onChange={(e) => setEquipmentType(e.target.value as '' | EquipmentType)}
+          >
+            <option value="">장비종류 선택</option>
+            {EQUIPMENT_TYPES.map((eq) => (
+              <option key={eq.code} value={eq.code}>{eq.label}</option>
+            ))}
+          </select>
+          {equipmentType === 'ETC' && (
+            <input
+              className="input-base text-sm"
+              placeholder="기타 장비명"
+              value={equipmentTypeEtc}
+              onChange={(e) => setEquipmentTypeEtc(e.target.value)}
+            />
+          )}
+        </div>
+      )}
+
+      {err && <div className="rounded bg-red-50 p-2 text-xs text-red-700">{err}</div>}
+      {msg && <div className="rounded bg-amber-50 p-2 text-xs text-amber-700">{msg}</div>}
+      <button onClick={submit} disabled={busy || !name.trim()} className="btn-primary text-sm w-full">
+        {busy ? '추가 중...' : '명단에 추가'}
+      </button>
     </div>
   );
 }
