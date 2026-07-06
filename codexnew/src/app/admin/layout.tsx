@@ -91,7 +91,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           로그아웃
         </button>
       </header>
-      <nav className="bg-slate-700 text-slate-200 px-4 flex gap-1 overflow-x-auto text-sm">
+      <nav className="bg-slate-700 text-slate-200 px-4 flex flex-wrap gap-1 text-sm">
         <NavLink href="/admin/dashboard">대시보드</NavLink>
         {can('COMPLETIONS_VIEW') && <NavLink href="/admin/completions">수료 현황</NavLink>}
         {can('COMPANIES_VIEW') && <NavLink href="/admin/companies">업체 관리</NavLink>}
