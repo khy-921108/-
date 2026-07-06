@@ -1,13 +1,13 @@
 /**
- * src/app/api/aligo-test/route.ts — 알리고 발송 검증용 임시 라우트 (R-5 0단계)
- * ⚠️ 임시: R-5 완료 시 이 파일과 /admin/sms-test 페이지를 삭제할 것.
+ * src/app/api/aligo-test/route.ts — SMS 발송 검증용 임시 라우트 (R-5 0단계)
+ * (경로명은 aligo-test 그대로 두지만 내부는 솔라피 사용 — R-5 완료 시 이 파일과
+ *  /admin/sms-test 페이지를 삭제할 것)
  * SUPER 관리자만 호출 가능(과금/남용 방지).
- * (주의: 폴더명에 `_` 접두사 금지 — Next.js private 폴더로 라우팅 제외됨)
  */
 
 import { NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/supabase/auth';
-import { sendSms, isAligoConfigured } from '@/lib/aligo';
+import { sendSms, isSmsConfigured } from '@/lib/sms';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,9 +15,9 @@ export async function POST(req: Request) {
   const auth = await requireSuperAdmin();
   if (!auth.ok) return auth.response;
 
-  if (!isAligoConfigured()) {
+  if (!isSmsConfigured()) {
     return NextResponse.json(
-      { success: false, message: 'ALIGO 환경변수 미설정 (ALIGO_USER_ID / ALIGO_API_KEY / ALIGO_SENDER)' },
+      { success: false, message: 'SOLAPI 환경변수 미설정 (SOLAPI_API_KEY / SOLAPI_API_SECRET / SOLAPI_SENDER)' },
       { status: 503 }
     );
   }
@@ -32,7 +32,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     success: r.ok,
     code: r.code,
-    aligoMessage: r.message,
+    aligoMessage: r.message, // sms-test 페이지 호환 필드명 유지
     raw: r.raw,
   });
 }

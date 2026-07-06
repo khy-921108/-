@@ -40,7 +40,7 @@ export default function SmsTestPage() {
       <h1 className="text-xl font-bold text-slate-800">📱 문자 발송 테스트 (임시)</h1>
       <div className="card space-y-3">
         <p className="text-sm text-slate-600">
-          알리고 발송이 되는지 확인하는 임시 화면입니다. 본인 휴대폰 번호를 넣고 발송해 보세요.
+          솔라피 발송이 되는지 확인하는 임시 화면입니다. 본인 휴대폰 번호를 넣고 발송해 보세요.
           <br />
           <span className="text-xs text-slate-400">SUPER 관리자만 실제 발송됩니다. R-5 완료 후 이 화면은 제거됩니다.</span>
         </p>
