@@ -5,7 +5,9 @@ export type SettingKey =
   | 'VALID_MONTHS'
   | 'VIDEO_COMPLETE_RATE'
   | 'COMPLETION_PREFIX'
-  | 'QUIZ_COUNT';
+  | 'QUIZ_COUNT'
+  | 'OTP_TTL_SEC'
+  | 'OTP_RESEND_SEC';
 
 const DEFAULTS: Record<SettingKey, string> = {
   PASS_THRESHOLD: '7',
@@ -13,6 +15,8 @@ const DEFAULTS: Record<SettingKey, string> = {
   VIDEO_COMPLETE_RATE: '95',
   COMPLETION_PREFIX: 'SF',
   QUIZ_COUNT: '10',
+  OTP_TTL_SEC: '120',
+  OTP_RESEND_SEC: '90',
 };
 
 export async function getSettings(): Promise<Record<SettingKey, string>> {

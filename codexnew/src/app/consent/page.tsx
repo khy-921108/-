@@ -42,6 +42,7 @@ export default function ConsentPage() {
             <li>6개월 유효기간 관리 및 재교육 안내</li>
             <li>법정 의무교육 증빙</li>
             <li>출입 차량 식별 및 관리 (해당자에 한함)</li>
+            <li>본인 확인 및 처리결과 통지 (문자)</li>
           </ul>
         </div>
 

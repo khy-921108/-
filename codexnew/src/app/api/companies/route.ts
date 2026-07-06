@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { isCompanyType, type CompanyType } from '@/lib/company';
+import { sendSms } from '@/lib/sms';
 
 /**
  * GET /api/companies?keyword=<업체명>
@@ -104,6 +105,17 @@ export async function POST(req: Request) {
         { success: false, code: 'SAVE_FAILED', message: '업체 등록에 실패했습니다.' },
         { status: 500 }
       );
+    }
+
+    // [R-5] 담당자 알림 — 신규 업체 신청 접수 (best-effort, 담당자 폰 = 발신번호와 동일)
+    try {
+      const managerPhone = process.env.SOLAPI_SENDER;
+      if (managerPhone) {
+        const sms = await sendSms(managerPhone, `[동남] 신규 업체 신청: ${name} (검토 필요)`);
+        if (!sms.ok) console.error('[api/companies POST] notify sms failed:', sms.code, sms.message);
+      }
+    } catch (e) {
+      console.error('[api/companies POST] notify sms unexpected:', e);
     }
 
     return NextResponse.json({ success: true, data });

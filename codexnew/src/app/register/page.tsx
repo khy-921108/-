@@ -59,8 +59,92 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // [R-5] 휴대폰 문자 인증(OTP)
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [verifiedPhone, setVerifiedPhone] = useState(''); // 인증 당시 번호(변경 시 재인증)
+  const [otpTtlLeft, setOtpTtlLeft] = useState(0);        // 남은 유효시간(초)
+  const [otpResendLeft, setOtpResendLeft] = useState(0);  // 재전송 대기(초)
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpError, setOtpError] = useState('');
+  const [otpNotice, setOtpNotice] = useState('');
+
   const vehicleRequired =
     targetTypeCode === 'TRUCK' || targetTypeCode === 'HEAVY';
+
+  // OTP 카운트다운 (1초 틱)
+  useEffect(() => {
+    if (otpTtlLeft <= 0 && otpResendLeft <= 0) return;
+    const t = setInterval(() => {
+      setOtpTtlLeft((s) => (s > 0 ? s - 1 : 0));
+      setOtpResendLeft((s) => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [otpTtlLeft > 0, otpResendLeft > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 번호를 바꾸면 인증 무효 (다른 번호로 통과 방지)
+  useEffect(() => {
+    if (otpVerified && phone !== verifiedPhone) {
+      setOtpVerified(false);
+      setOtpSent(false);
+      setOtpCode('');
+      setOtpNotice('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phone]);
+
+  const sendOtp = async () => {
+    setOtpError('');
+    setOtpNotice('');
+    setOtpLoading(true);
+    try {
+      const res = await fetch('/api/verify-phone/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setOtpError(json.message || '발송 실패');
+        if (typeof json.retryAfterSec === 'number') setOtpResendLeft(json.retryAfterSec);
+        return;
+      }
+      setOtpSent(true);
+      setOtpCode('');
+      setOtpTtlLeft(json.data?.ttlSec ?? 120);
+      setOtpResendLeft(json.data?.resendSec ?? 90);
+      setOtpNotice('인증번호를 문자로 보냈습니다.');
+    } catch {
+      setOtpError('네트워크 오류가 발생했습니다.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const confirmOtp = async () => {
+    setOtpError('');
+    setOtpLoading(true);
+    try {
+      const res = await fetch('/api/verify-phone/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, code: otpCode }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setOtpError(json.message || '인증 실패');
+        return;
+      }
+      setOtpVerified(true);
+      setVerifiedPhone(phone);
+      setOtpNotice('');
+    } catch {
+      setOtpError('네트워크 오류가 발생했습니다.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (sessionStorage.getItem('consent') !== 'Y') {
@@ -181,6 +265,8 @@ export default function RegisterPage() {
     name.trim() &&
     birthDate &&
     phone.length >= 10 &&
+    otpVerified &&
+    verifiedPhone === phone &&
     targetTypeCode &&
     (!vehicleRequired || vehicleNumber.trim().length > 0) &&
     (!specRequired || spec.trim().length > 0) &&
@@ -442,7 +528,90 @@ export default function RegisterPage() {
             value={phone}
             onChange={(e) => setPhone(formatPhone(e.target.value))}
             placeholder="01012345678"
+            disabled={otpVerified}
           />
+
+          {/* [R-5] 휴대폰 문자 인증 */}
+          {otpVerified ? (
+            <div className="mt-2 flex items-center gap-2 rounded-xl border-2 border-emerald-300 bg-emerald-50 px-4 py-3">
+              <span className="text-lg">✅</span>
+              <span className="font-bold text-emerald-700">본인 인증 완료</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setOtpVerified(false);
+                  setOtpSent(false);
+                  setOtpCode('');
+                }}
+                className="ml-auto text-xs text-slate-500 underline"
+              >
+                번호 변경
+              </button>
+            </div>
+          ) : (
+            <div className="mt-2 space-y-2">
+              {!otpSent ? (
+                <button
+                  type="button"
+                  onClick={sendOtp}
+                  disabled={phone.length < 10 || otpLoading}
+                  className="w-full rounded-xl border-2 border-brand bg-brand/5 py-3 text-base font-bold text-brand disabled:opacity-40"
+                >
+                  {otpLoading ? '발송 중...' : '📱 인증번호 받기'}
+                </button>
+              ) : (
+                <div className="rounded-xl border-2 border-brand/40 bg-white p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-bold text-slate-700">인증번호 입력</span>
+                    {otpTtlLeft > 0 ? (
+                      <span className="text-xl font-extrabold text-brand tabular-nums">
+                        {Math.floor(otpTtlLeft / 60)}:{String(otpTtlLeft % 60).padStart(2, '0')}
+                      </span>
+                    ) : (
+                      <span className="text-sm font-bold text-red-600">시간 초과</span>
+                    )}
+                  </div>
+                  {otpTtlLeft > 0 ? (
+                    <>
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        className="input-base text-center text-2xl font-extrabold tracking-[0.5em]"
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                        placeholder="●●●●●●"
+                        autoComplete="one-time-code"
+                      />
+                      <button
+                        type="button"
+                        onClick={confirmOtp}
+                        disabled={otpCode.length !== 6 || otpLoading}
+                        className="btn-primary"
+                      >
+                        {otpLoading ? '확인 중...' : '인증 확인'}
+                      </button>
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-500">시간이 초과되었습니다 — 아래 재전송을 눌러주세요.</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={sendOtp}
+                    disabled={otpResendLeft > 0 || otpLoading}
+                    className="w-full rounded-lg border border-slate-300 py-2 text-sm font-semibold text-slate-600 disabled:opacity-40"
+                  >
+                    {otpResendLeft > 0 ? `재전송 (${otpResendLeft}초 후 가능)` : '인증번호 재전송'}
+                  </button>
+                </div>
+              )}
+              {otpNotice && (
+                <p className="text-xs text-emerald-700 px-1">{otpNotice}</p>
+              )}
+              {otpError && (
+                <div className="rounded-lg bg-red-50 p-2 text-xs text-red-700">{otpError}</div>
+              )}
+            </div>
+          )}
         </div>
         <div>
           <label className="label">대상 구분</label>

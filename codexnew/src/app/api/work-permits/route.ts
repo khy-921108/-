@@ -4,6 +4,7 @@ import { evaluateParticipant } from '@/lib/participant-eligibility';
 import { generateWorkPermitNumber } from '@/lib/work-permit-number';
 import { SUPPLEMENTAL_KEYS } from '@/lib/work-permit-constants';
 import { evaluateRequiredDocs } from '@/lib/safety-doc-status';
+import { sendSms } from '@/lib/sms';
 
 export const runtime = 'nodejs';
 
@@ -254,6 +255,17 @@ export async function POST(req: Request) {
         { success: false, code: 'SAVE_FAILED', message: '참여자 저장에 실패했습니다. 다시 시도해 주세요.' },
         { status: 500 }
       );
+    }
+
+    // [R-5] 담당자 알림 — 작업허가 신청 접수 (best-effort, 담당자 폰 = 발신번호와 동일)
+    try {
+      const managerPhone = process.env.SOLAPI_SENDER;
+      if (managerPhone) {
+        const sms = await sendSms(managerPhone, `[동남] 작업허가 신청 ${permit.permit_number} ${company.name}`);
+        if (!sms.ok) console.error('[work-permits POST] notify sms failed:', sms.code, sms.message);
+      }
+    } catch (e) {
+      console.error('[work-permits POST] notify sms unexpected:', e);
     }
 
     return NextResponse.json({

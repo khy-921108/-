@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { isCompanyType, isCompanyStatus } from '@/lib/company';
+import { sendSms } from '@/lib/sms';
 
 /**
  * GET /api/admin/companies/:id
@@ -110,6 +111,20 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     }
 
     const supabase = createServiceClient();
+
+    // [R-5] 상태 전환 통지 대비 — 변경 전 상태 조회
+    const { data: before } = await supabase
+      .from('companies')
+      .select('status')
+      .eq('id', ctx.params.id)
+      .maybeSingle();
+
+    // [R-2] 관리자 화면에서 상태를 바꾸는 경우에도 처리자/시각 기록
+    if (typeof update.status === 'string' && before && update.status !== before.status) {
+      update.status_changed_by = auth.admin.email;
+      update.status_changed_at = new Date().toISOString();
+    }
+
     const { data, error } = await supabase
       .from('companies')
       .update(update)
@@ -130,6 +145,26 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
         { status: 404 }
       );
     }
+
+    // [R-5] 검토중→정식등록/사용중지 전환 시 담당자 통지 — best-effort
+    try {
+      if (
+        before?.status === 'REVIEW' &&
+        typeof update.status === 'string' &&
+        (update.status === 'ACTIVE' || update.status === 'DISABLED') &&
+        data.phone
+      ) {
+        const msg =
+          update.status === 'ACTIVE'
+            ? `[동남] ${data.name} 업체 등록이 승인되었습니다.`
+            : `[동남] ${data.name} 업체 등록이 반려되었습니다. 문의: 안전보건팀`;
+        const sms = await sendSms(data.phone, msg);
+        if (!sms.ok) console.error('[admin/companies PATCH] sms failed:', sms.code, sms.message);
+      }
+    } catch (e) {
+      console.error('[admin/companies PATCH] sms unexpected:', e);
+    }
+
     return NextResponse.json({ success: true, data });
   } catch (e) {
     console.error('[admin/companies/:id PATCH] unexpected:', e);

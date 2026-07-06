@@ -100,6 +100,25 @@ export async function POST(req: Request) {
 
     const supabase = createServiceClient();
 
+    // [R-5] 휴대폰 문자 인증 서버 강제 — 프론트 우회 방지.
+    // 최근 30분 내 verified 기록이 있어야 세션 생성 허용 (최초/재교육 매번 동일).
+    const phoneDigits = String(phone).replace(/[^0-9]/g, '');
+    const verifyWindow = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const { data: verifiedRow } = await supabase
+      .from('phone_verifications')
+      .select('id')
+      .eq('phone', phoneDigits)
+      .not('verified_at', 'is', null)
+      .gte('verified_at', verifyWindow)
+      .limit(1)
+      .maybeSingle();
+    if (!verifiedRow) {
+      return NextResponse.json(
+        { success: false, code: 'PHONE_NOT_VERIFIED', message: '휴대폰 문자 인증을 먼저 완료해 주세요.' },
+        { status: 403 }
+      );
+    }
+
     // 0. company_id 가 있으면 업체 조회 → 업체명을 affiliation 스냅샷으로 채움
     let resolvedAffiliation = trimmedAffiliation;
     let resolvedCompanyId: string | null = null;

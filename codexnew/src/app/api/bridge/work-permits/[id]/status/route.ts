@@ -9,6 +9,7 @@
 
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { sendSms } from '@/lib/sms';
 
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store'; // 상태 재조회 캐시 방지(중복 처리 방지)
@@ -30,7 +31,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   const supabase = createServiceClient();
   const { data: permit } = await supabase
     .from('work_permits')
-    .select('id, status')
+    .select('id, status, permit_number, applicant_phone')
     .eq('id', ctx.params.id)
     .maybeSingle();
 
@@ -51,5 +52,20 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   if (error) {
     return NextResponse.json({ error: 'UPDATE_FAILED', message: error.message }, { status: 500 });
   }
+
+  // [R-5] 신청자 통지 문자 — best-effort (실패해도 본 처리는 성공 유지)
+  try {
+    if (permit.applicant_phone) {
+      const msg =
+        action === 'APPROVE'
+          ? `[동남] 작업허가 ${permit.permit_number} 승인되었습니다.`
+          : `[동남] 작업허가 ${permit.permit_number} 반려되었습니다. 문의: 안전보건팀`;
+      const sms = await sendSms(permit.applicant_phone, msg);
+      if (!sms.ok) console.error('[bridge/work-permits status] sms failed:', sms.code, sms.message);
+    }
+  } catch (e) {
+    console.error('[bridge/work-permits status] sms unexpected:', e);
+  }
+
   return NextResponse.json({ ok: true, status: newStatus });
 }
