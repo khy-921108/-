@@ -10,6 +10,7 @@ import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store'; // Supabase 조회를 Next Data Cache 에 캐시하지 않음(승인 즉시 반영)
 
 export async function GET(req: Request) {
   const key = process.env.BRIDGE_KEY;

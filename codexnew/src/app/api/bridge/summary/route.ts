@@ -11,6 +11,7 @@ import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store'; // Supabase 조회 캐시 방지(실시간 집계)
 
 export async function GET(req: Request) {
   const key = process.env.BRIDGE_KEY;

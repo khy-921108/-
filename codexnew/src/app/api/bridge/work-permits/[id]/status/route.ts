@@ -11,6 +11,7 @@ import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store'; // 상태 재조회 캐시 방지(중복 처리 방지)
 
 export async function POST(req: Request, ctx: { params: { id: string } }) {
   const key = process.env.BRIDGE_KEY;
