@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/supabase/auth';
+import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 
 /**
@@ -10,7 +10,7 @@ import { createServiceClient } from '@/lib/supabase/server';
  */
 
 export async function GET(req: Request) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('QUESTIONS_MANAGE');
   if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
@@ -33,7 +33,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('QUESTIONS_MANAGE');
   if (!auth.ok) return auth.response;
 
   const body = await req.json();
@@ -63,7 +63,7 @@ export async function POST(req: Request) {
 }
 
 export async function PUT(req: Request) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('QUESTIONS_MANAGE');
   if (!auth.ok) return auth.response;
 
   const body = await req.json();
@@ -85,7 +85,7 @@ export async function PUT(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('QUESTIONS_MANAGE');
   if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);

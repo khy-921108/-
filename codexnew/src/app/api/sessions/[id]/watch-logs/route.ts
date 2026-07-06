@@ -9,9 +9,10 @@ import { getSettingInt } from '@/lib/settings';
 export async function POST(req: Request, ctx: { params: { id: string } }) {
   try {
     const sessionId = ctx.params.id;
-    const { courseVideoId, watchedSec, progressRate } = await req.json();
+    const { courseVideoId, watchedSec } = await req.json();
+    // progressRate는 클라 값을 받지 않음 (위변조 방지)
 
-    if (!courseVideoId || typeof progressRate !== 'number') {
+    if (!courseVideoId || typeof watchedSec !== 'number' || watchedSec < 0) {
       return NextResponse.json(
         { success: false, code: 'INVALID_INPUT', message: '필수 값 누락' },
         { status: 400 }
@@ -19,9 +20,26 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     }
 
     const completeRate = await getSettingInt('VIDEO_COMPLETE_RATE');
-    const completed = progressRate >= completeRate;
-
     const supabase = createServiceClient();
+
+    // 서버가 직접 duration 조회 → progressRate 재계산 (클라 위변조 무력화)
+    const { data: video } = await supabase
+      .from('course_videos')
+      .select('duration_sec')
+      .eq('id', courseVideoId)
+      .single();
+
+    if (!video) {
+      return NextResponse.json(
+        { success: false, code: 'VIDEO_NOT_FOUND', message: '영상을 찾을 수 없습니다.' },
+        { status: 404 }
+      );
+    }
+
+    const dur = video.duration_sec;
+    const clampedWatched = Math.min(watchedSec, dur);
+    const serverRate = dur > 0 ? Math.round((clampedWatched / dur) * 100) : 0;
+    const completed = serverRate >= completeRate;
 
     const { error } = await supabase
       .from('watch_logs')
@@ -29,8 +47,8 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
         {
           session_id: sessionId,
           course_video_id: courseVideoId,
-          watched_sec: watchedSec ?? 0,
-          progress_rate: Math.min(100, Math.max(0, progressRate)),
+          watched_sec: clampedWatched,
+          progress_rate: serverRate,
           completed_yn: completed,
           updated_at: new Date().toISOString(),
         },

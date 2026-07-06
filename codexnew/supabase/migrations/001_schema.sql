@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS training_sessions (
   name VARCHAR(50) NOT NULL,
   birth_date DATE NOT NULL,
   phone VARCHAR(20) NOT NULL,
+  vehicle_number VARCHAR(30),
   target_type_id INT REFERENCES target_types(id),
   course_id INT REFERENCES courses(id),
   consent_yn BOOLEAN DEFAULT FALSE,

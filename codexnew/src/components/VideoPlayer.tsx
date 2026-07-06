@@ -90,7 +90,9 @@ export default function VideoPlayer({
       }
 
       if (ev.data === YT.PlayerState.ENDED) {
-        if (!completedRef.current) {
+        const dur = durationRef.current || playerRef.current.getDuration();
+        const rate = dur > 0 ? Math.round((watchedSecondsRef.current.size / dur) * 100) : 0;
+        if (!completedRef.current && rate >= completeRate) {
           completedRef.current = true;
           onComplete();
         }

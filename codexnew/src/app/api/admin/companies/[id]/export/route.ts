@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/supabase/auth';
+import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getCompanyRoster } from '@/lib/company-roster';
 import { buildCompanyRosterWorkbook } from '@/lib/excel-helpers';
@@ -14,7 +14,7 @@ export const runtime = 'nodejs'; // exceljs 는 node 런타임 필요
  * - 인원/현황 화면과 동일 기준(lib/company-roster).
  */
 export async function GET(_req: Request, ctx: { params: { id: string } }) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('EXCEL_EXPORT');
   if (!auth.ok) return auth.response;
 
   const supabase = createServiceClient();

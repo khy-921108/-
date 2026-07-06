@@ -3,6 +3,18 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { evaluateParticipant } from '@/lib/participant-eligibility';
 import { maskPhone } from '@/lib/format';
 
+/**
+ * POST /api/work-permits/verify-participant  (공개) — 1명씩 본인확인
+ * req: { name, birthDate, phone, workEnd }  (작업 종료일시 — 작업일 기준 판정)
+ * res: { success, data:{ status:'VALID'|'EXPIRED'|'NONE', name, companyName, targetLabel,
+ *                        vehicleNumber?, spec?, equipmentType?, completedAt, expiresAt,
+ *                        marginDays, phoneMasked } }
+ *
+ * - VALID: expires_at >= workEnd (작업일까지 유효)
+ * - EXPIRED: 작업일에 만료 → 추가불가
+ * - NONE: 수료 없음
+ * - 업체 전체 명단 반환 없음(1명 조회). 연락처 마스킹.
+ */
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -27,6 +39,7 @@ export async function POST(req: Request) {
     const supabase = createServiceClient();
     const result = await evaluateParticipant(supabase, { name, birthDate, phone }, workEnd);
 
+    // 응답에서 PII 마스킹 + 필드 선별 (원본 phone/sessionId 등은 미노출)
     return NextResponse.json({
       success: true,
       data: {

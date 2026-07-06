@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/supabase/auth';
+import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import {
   DOC_BUCKET,
@@ -19,7 +19,7 @@ export const runtime = 'nodejs';
  * res: { success, data:{ signedUrl, token, path, fileName, category } }
  */
 export async function POST(req: Request, ctx: { params: { id: string } }) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('COMPANIES_EDIT');
   if (!auth.ok) return auth.response;
 
   const companyId = ctx.params.id;

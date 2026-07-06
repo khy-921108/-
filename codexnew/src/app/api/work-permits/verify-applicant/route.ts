@@ -2,6 +2,17 @@ import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { maskPhone } from '@/lib/format';
 
+/**
+ * POST /api/work-permits/verify-applicant  (공개) — STEP1 진입 게이트
+ * req: { name, birthDate, phone }
+ * res: { success, data:{ status:'OK'|'NO_EDU'|'NO_COMPANY', name, company:{id,name}|null,
+ *                        completedAt?, expiresAt?, phoneMasked } }
+ *
+ * - OK       = 유효 수료(completions, now 기준) 있음 AND training_sessions.company_id 연결됨
+ * - NO_EDU   = 유효 수료 없음 → "교육 먼저"
+ * - NO_COMPANY = 수료는 있으나 업체 미연결 → "업체 등록 먼저"
+ * - 명단 덤프 없음(본인 1명). 연락처 마스킹.
+ */
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -18,6 +29,7 @@ export async function POST(req: Request) {
 
     const supabase = createServiceClient();
 
+    // 1. 본인 세션(이름+생년월일+전화)
     const { data: sessions, error: sessErr } = await supabase
       .from('training_sessions')
       .select('id, name, affiliation, company_id, created_at')
@@ -43,6 +55,7 @@ export async function POST(req: Request) {
       });
     }
 
+    // 2. 유효 수료 확인 (now 기준 — 진입 게이트는 "교육을 마쳤는가")
     const sessionIds = sessions.map((s: any) => s.id);
     const { data: comps, error: compErr } = await supabase
       .from('completions')
@@ -70,6 +83,7 @@ export async function POST(req: Request) {
       });
     }
 
+    // 3. 업체 연결 확인 — 유효 수료가 속한 세션의 company_id 우선, 없으면 최근 세션 중 company_id 보유분
     const validSession =
       sessions.find((s: any) => s.id === validComp.session_id) ?? sessions[0];
     let companyId: string | null = validSession.company_id ?? null;
@@ -92,6 +106,7 @@ export async function POST(req: Request) {
       });
     }
 
+    // 4. 업체 정보(공개 최소 필드)
     const { data: company } = await supabase
       .from('companies')
       .select('id, name, status')
@@ -99,6 +114,7 @@ export async function POST(req: Request) {
       .maybeSingle();
 
     if (!company || company.status === 'DISABLED') {
+      // 업체가 사용중지/삭제면 업체 재선택 유도
       return NextResponse.json({
         success: true,
         data: {

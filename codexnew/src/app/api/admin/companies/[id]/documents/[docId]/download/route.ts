@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/supabase/auth';
+import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { DOC_BUCKET, isBucketMissing, pathBelongsToCompany } from '@/lib/company-documents';
 
@@ -11,7 +11,7 @@ export const runtime = 'nodejs';
  * - 문서가 그 업체 소속인지 검증(id + company_id 동시 매칭, 경로 격리) → 타업체 다운로드 차단.
  */
 export async function GET(_req: Request, ctx: { params: { id: string; docId: string } }) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('COMPANIES_VIEW');
   if (!auth.ok) return auth.response;
 
   const { id: companyId, docId } = ctx.params;

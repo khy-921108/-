@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/supabase/auth';
+import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
@@ -10,7 +10,7 @@ export const runtime = 'nodejs';
  * - id + company_id 동시 매칭으로 타업체 인원 삭제 차단.
  */
 export async function DELETE(_req: Request, ctx: { params: { id: string; memberId: string } }) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('COMPANIES_EDIT');
   if (!auth.ok) return auth.response;
 
   const { id: companyId, memberId } = ctx.params;

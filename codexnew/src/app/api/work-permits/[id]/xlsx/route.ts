@@ -3,10 +3,11 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { fillWorkPermitWorkbook, type PermitDocData } from '@/lib/work-permit-template';
 import { getDocsForOutput } from '@/lib/safety-doc-status';
 
-export const runtime = 'nodejs';
+export const runtime = 'nodejs'; // exceljs + 템플릿 파일 읽기
 
 /**
  * GET /api/work-permits/:id/xlsx  (공개, UUID 알아야) — 회사 양식 자동채움 다운로드
+ * - work-permit-template.ts 로 템플릿 로드→셀 채움→attachment.
  */
 export async function GET(_req: Request, ctx: { params: { id: string } }) {
   const supabase = createServiceClient();
@@ -47,6 +48,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     companyName: p.company_name,
   }));
 
+  // 1C-2 필수문서 데이터 수집(있으면 출력에 첨부)
   let docs;
   try {
     docs = await getDocsForOutput(supabase, {
@@ -56,7 +58,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     });
   } catch (e) {
     console.error('[work-permits/:id/xlsx] docs fetch:', e);
-    docs = undefined;
+    docs = undefined; // 문서 수집 실패해도 1C-1 양식은 출력
   }
 
   const docData: PermitDocData = {

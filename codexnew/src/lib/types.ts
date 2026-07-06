@@ -119,3 +119,53 @@ export interface Completion {
   expires_at: string;
   score: number;
 }
+
+// ===== 1C-1 작업허가서 =====
+export type SupplementalFlag = 'Y' | 'N';
+
+export interface WorkPermit {
+  id: string;
+  permit_number: string;
+  permit_type: 'GENERAL';
+  request_company_id: string | null;
+  request_company_name: string;
+  work_name: string;
+  work_location: string;
+  work_start: string;
+  work_end: string;
+  work_content: string;
+  applicant_name: string;
+  applicant_phone: string;
+  applicant_title: string | null;
+  equipment_no: string | null;
+  tbm: WorkPermitTbm;
+  supplemental: Record<string, SupplementalFlag>;
+  note: string | null;
+  status: string;
+  created_at: string;
+}
+
+export interface WorkPermitTbm {
+  datetime?: string;
+  place?: string;
+  workName?: string;
+  teamLeader?: { company: string | null; name: string };
+  attendees?: { name: string | null; company: string | null }[];
+}
+
+export interface WorkPermitParticipant {
+  id: string;
+  work_permit_id: string;
+  session_id: string | null;
+  name: string | null;
+  phone: string | null;
+  company_id: string | null;
+  company_name: string | null;
+  target_type: string | null;
+  vehicle_number: string | null;
+  equipment_type: string | null;
+  spec: string | null;
+  completed_at: string | null;
+  expires_at: string | null;
+  sort_order: number | null;
+}

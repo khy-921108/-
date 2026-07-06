@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/supabase/auth';
+import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { parseCompanyMembersWorkbook, type ParseWarning } from '@/lib/excel-helpers';
 
@@ -13,7 +13,7 @@ export const runtime = 'nodejs';
  * - 매칭 키: (company_id, name, birth_date, normalized_phone).
  */
 export async function POST(req: Request, ctx: { params: { id: string } }) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('EXCEL_IMPORT');
   if (!auth.ok) return auth.response;
 
   const companyId = ctx.params.id;

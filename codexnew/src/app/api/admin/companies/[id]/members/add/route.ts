@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/supabase/auth';
+import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { isEquipmentType, isMemberType, normalizePhone } from '@/lib/equipment';
 
@@ -13,7 +13,7 @@ export const runtime = 'nodejs';
  * req: { name(필수), birthDate, phone, memberType, vehicleNumber, equipmentType, equipmentTypeEtc, spec }
  */
 export async function POST(req: Request, ctx: { params: { id: string } }) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('COMPANIES_EDIT');
   if (!auth.ok) return auth.response;
 
   const companyId = ctx.params.id;

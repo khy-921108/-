@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/supabase/auth';
+import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getCompanyRoster } from '@/lib/company-roster';
 
@@ -11,7 +11,7 @@ import { getCompanyRoster } from '@/lib/company-roster';
  * - 업체 범위만 조회(타업체 인원 미노출).
  */
 export async function GET(_req: Request, ctx: { params: { id: string } }) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('COMPANIES_VIEW');
   if (!auth.ok) return auth.response;
 
   const supabase = createServiceClient();

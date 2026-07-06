@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/supabase/auth';
+import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 
 /**
@@ -13,12 +13,13 @@ export async function DELETE(
   _req: Request,
   ctx: { params: { id: string } }
 ) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('SESSION_DELETE');
   if (!auth.ok) return auth.response;
 
   const sessionId = ctx.params.id;
   const supabase = createServiceClient();
 
+  // 1. 세션 존재 확인
   const { data: session } = await supabase
     .from('training_sessions')
     .select('id, name, status')
@@ -32,6 +33,7 @@ export async function DELETE(
     );
   }
 
+  // 2. 수료 이력 있는지 확인 (있으면 삭제 거부)
   const { data: completion } = await supabase
     .from('completions')
     .select('id, completion_number')
@@ -49,6 +51,7 @@ export async function DELETE(
     );
   }
 
+  // 3. 삭제 (CASCADE 로 watch_logs/exam_results 동반 삭제)
   const { error } = await supabase
     .from('training_sessions')
     .delete()

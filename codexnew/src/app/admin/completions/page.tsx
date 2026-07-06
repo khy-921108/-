@@ -87,6 +87,7 @@ export default function AdminCompletionsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ESC 키로 모달 닫기
   useEffect(() => {
     const onEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setSelected(null);
@@ -251,6 +252,7 @@ function DetailModal({
         className="print-area bg-white rounded-2xl shadow-xl w-full max-w-lg my-8"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* 인쇄용 헤더 */}
         <div className="border-b border-slate-200 p-6">
           <div className="hidden print:block text-center mb-4">
             <h2 className="text-xl font-black text-slate-800">

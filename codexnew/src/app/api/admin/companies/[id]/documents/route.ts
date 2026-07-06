@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
+import { requirePermission } from '@/lib/supabase/auth';
 import {
   docCategoryLabel,
   isDocCategory,
@@ -15,7 +16,7 @@ export const runtime = 'nodejs';
  * - 업체 범위만(타업체 문서 미노출).
  */
 export async function GET(req: Request, ctx: { params: { id: string } }) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('COMPANIES_VIEW');
   if (!auth.ok) return auth.response;
 
   const companyId = ctx.params.id;
@@ -64,7 +65,7 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
  * req: { category, fileName, storagePath, mimeType, sizeBytes, note? }
  */
 export async function POST(req: Request, ctx: { params: { id: string } }) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('COMPANIES_EDIT');
   if (!auth.ok) return auth.response;
 
   const companyId = ctx.params.id;

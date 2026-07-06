@@ -5,6 +5,9 @@ import { sixMonthsLater } from '@/lib/safety-doc-status';
 
 /**
  * POST /api/safety-pledges  (공개) — 개인 안전준수 서약(#8) 발급
+ * req: { name, birthDate, phone, companyId, nationality, bloodType, jobType }
+ * - 6개월 유효(issued + 6개월). 서명은 현장(앱 미입력).
+ * - 발급 시 company_name 스냅샷.
  */
 export async function POST(req: Request) {
   try {
@@ -38,6 +41,7 @@ export async function POST(req: Request) {
 
     const supabase = createServiceClient();
 
+    // 업체명 스냅샷
     let companyName: string | null = null;
     if (companyId) {
       const { data: c } = await supabase.from('companies').select('name').eq('id', companyId).maybeSingle();

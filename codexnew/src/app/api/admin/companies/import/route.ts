@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/supabase/auth';
+import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import {
   parseCompaniesWorkbook,
@@ -22,7 +22,7 @@ export const runtime = 'nodejs';
  *   company_members: (company_id, name, birth_date, normalized_phone) UNIQUE NULLS NOT DISTINCT
  */
 export async function POST(req: Request) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('EXCEL_IMPORT');
   if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);

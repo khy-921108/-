@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 
 /**
  * 디지털 서명 패드 — Pointer Events로 마우스(PC)·터치(폰)·펜 통합 처리.
+ * - 그린 결과를 PNG data URL로 onChange 전달(빈 서명이면 '').
+ * - 모바일 스크롤 방지: touchAction: 'none'.
  */
 export default function SignaturePad({
   onChange,

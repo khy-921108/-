@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/supabase/auth';
+import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { isCompanyType, isCompanyStatus, type CompanyType } from '@/lib/company';
 
@@ -11,7 +11,7 @@ import { isCompanyType, isCompanyStatus, type CompanyType } from '@/lib/company'
  * - 통계: 총건수, 상태별 건수.
  */
 export async function GET(req: Request) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('COMPANIES_VIEW');
   if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
@@ -68,7 +68,7 @@ export async function GET(req: Request) {
  * Body: { name, companyType?, bizNo?, managerName?, phone?, status?, note? }
  */
 export async function POST(req: Request) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('COMPANIES_EDIT');
   if (!auth.ok) return auth.response;
 
   try {

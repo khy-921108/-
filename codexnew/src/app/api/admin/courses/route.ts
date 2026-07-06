@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/supabase/auth';
+import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 
 /**
@@ -8,7 +8,7 @@ import { createServiceClient } from '@/lib/supabase/server';
  * POST { action: 'createCourse' | 'addVideo' | 'updateCourse' | 'removeVideo' | 'toggleActive' }
  */
 export async function GET() {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('COURSES_MANAGE');
   if (!auth.ok) return auth.response;
 
   const supabase = createServiceClient();
@@ -22,7 +22,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('COURSES_MANAGE');
   if (!auth.ok) return auth.response;
 
   const body = await req.json();

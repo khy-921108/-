@@ -3,8 +3,12 @@ import { createServiceClient } from '@/lib/supabase/server';
 
 /**
  * POST /api/work-permits/my-list  (공개) — 신청자 본인 신청내역 조회
- * - 본인(applicant_name + applicant_birth_date + applicant_phone) 3필드 일치 건만.
- * - 작업예정일(work_start) 범위 필터.
+ * req: { name, phone }
+ * res: { success, data:{ items:[{permitId,permitNumber,workName,workStart,workEnd,
+ *                                companyName,supplemental,status,createdAt}] } }
+ *
+ * - 본인(applicant_name + applicant_phone) 일치 건만 반환. 타인 명단 덤프 없음.
+ * - 인쇄/양식은 permitId(UUID)로 접근(기존 모델과 동일).
  */
 export async function POST(req: Request) {
   try {
@@ -34,6 +38,7 @@ export async function POST(req: Request) {
       .order('work_start', { ascending: false })
       .limit(200);
 
+    // 작업예정일(work_start) 범위 필터 — KST 기준 일자
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) {
       q = q.gte('work_start', `${dateFrom}T00:00:00+09:00`);
     }

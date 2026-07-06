@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/supabase/auth';
+import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { isCompanyType, isCompanyStatus } from '@/lib/company';
 
@@ -8,7 +8,7 @@ import { isCompanyType, isCompanyStatus } from '@/lib/company';
  * 단건 조회. 어드민 전용.
  */
 export async function GET(_req: Request, ctx: { params: { id: string } }) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('COMPANIES_VIEW');
   if (!auth.ok) return auth.response;
 
   const supabase = createServiceClient();
@@ -41,7 +41,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
  * Body: { name?, bizNo?, companyType?, managerName?, phone?, status?, note? }
  */
 export async function PATCH(req: Request, ctx: { params: { id: string } }) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('COMPANIES_EDIT');
   if (!auth.ok) return auth.response;
 
   try {

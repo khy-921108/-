@@ -1,5 +1,11 @@
 /**
  * 작업허가서(1C-1) 상수 — 코드·라벨은 이 파일에서만 관리.
+ *
+ * - SUPPLEMENTAL_WORKS: 보충작업 7종. 앱이 채우는 **유일한 체크**(해당/비해당).
+ *   양식의 E6/E7/E8 셀에 여러 □가 묶여 있어, 각 종류의 라벨 토큰을 기준으로 □→■ 치환.
+ * - GENERAL_SAFETY_MEASURES: 안전조치 16항목 — **표시 전용**(HTML 빈 체크 그리드 라벨).
+ *   1C-1은 앱 입력 없음. xlsx 양식엔 이미 인쇄돼 있어 건드리지 않음.
+ * - TBM_CHECKLIST: 작업 전 점검 8항목 — 표시 전용(양식 빈칸, 현장).
  */
 
 export type SupplementalKey =
@@ -14,10 +20,18 @@ export type SupplementalKey =
 export interface SupplementalWork {
   key: SupplementalKey;
   label: string;
+  /** 양식 시트 '2_일반위험작업허가서'에서 이 종류 □가 들어있는 셀(anchor) */
   cell: 'E6' | 'E7' | 'E8';
+  /** 셀 안에서 이 종류를 식별하는 라벨 토큰(□ 바로 뒤 텍스트). 치환 기준. */
   token: string;
 }
 
+/**
+ * 양식 실측(E6/E7/E8) 기준:
+ *   E6 = "□ 밀폐공간  □ 고소"
+ *   E7 = "□ 정전  □ 굴착  □ 화기"
+ *   E8 = "□ 중장비  □ 방사선"
+ */
 export const SUPPLEMENTAL_WORKS: SupplementalWork[] = [
   { key: 'confined', label: '밀폐공간', cell: 'E6', token: '밀폐공간' },
   { key: 'height', label: '고소', cell: 'E6', token: '고소' },

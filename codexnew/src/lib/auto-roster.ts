@@ -5,6 +5,7 @@
  * - 화물차/중장비면 차량번호·장비종류·spec 포함. member_type 은 target_types.code 에서 매핑.
  *
  * 🔴 비차단 원칙: 이 함수는 내부에서 모든 예외를 삼키고 결과만 반환한다.
+ *    (호출측 complete 핸들러도 try/catch 로 한 번 더 감쌈 — 명단 실패가 수료/수료증/응답에 영향 0)
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -35,10 +36,11 @@ export async function autoRegisterFromSession(
       .maybeSingle();
     if (error) throw error;
     if (!s) return { registered: false, reason: 'NO_SESSION' };
-    if (!s.company_id) return { registered: false, reason: 'NO_COMPANY' };
+    if (!s.company_id) return { registered: false, reason: 'NO_COMPANY' }; // 소속 없는 세션은 등록 안 함
     const name = (s.name ?? '').trim();
     if (!name) return { registered: false, reason: 'NO_NAME' };
 
+    // 대상구분 → member_type
     let memberType: MemberType = 'WORKER';
     if (s.target_type_id) {
       const { data: tt } = await supabase
@@ -62,11 +64,12 @@ export async function autoRegisterFromSession(
       spec: s.spec ?? null,
     };
 
+    // ON CONFLICT DO NOTHING — UNIQUE(company_id,name,birth_date,normalized_phone) NULLS NOT DISTINCT
     const { data, error: upErr } = await supabase
       .from('company_members')
       .upsert(values, {
         onConflict: 'company_id,name,birth_date,normalized_phone',
-        ignoreDuplicates: true,
+        ignoreDuplicates: true, // 기존 행 있으면 아무것도 안 함(덮어쓰기 금지)
       })
       .select('id');
     if (upErr) throw upErr;
@@ -74,6 +77,7 @@ export async function autoRegisterFromSession(
     const inserted = Array.isArray(data) && data.length > 0;
     return { registered: true, duplicate: !inserted };
   } catch (e) {
+    // 비차단: 어떤 오류도 삼키고 결과만 반환(수료 처리에 영향 0)
     console.error('[auto-roster] 무시(비차단):', e);
     return { registered: false, reason: 'ERROR' };
   }

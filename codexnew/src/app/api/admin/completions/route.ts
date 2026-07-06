@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/supabase/auth';
+import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 
 /**
@@ -10,7 +10,7 @@ import { createServiceClient } from '@/lib/supabase/server';
  * - Supabase error 를 삼키지 않고 500 으로 반환한다.
  */
 export async function GET(req: Request) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('COMPLETIONS_VIEW');
   if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);

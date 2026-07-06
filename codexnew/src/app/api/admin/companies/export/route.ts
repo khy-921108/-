@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/supabase/auth';
+import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { buildCompaniesWorkbook } from '@/lib/excel-helpers';
 
@@ -12,7 +12,7 @@ export const runtime = 'nodejs'; // exceljs 는 node 런타임 필요
  * - 두 시트(업체/인원). 헤더는 사람이 읽는 라벨.
  */
 export async function GET() {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('EXCEL_EXPORT');
   if (!auth.ok) return auth.response;
 
   const supabase = createServiceClient();

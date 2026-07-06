@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/supabase/auth';
+import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getSignatureStatusForPermits } from '@/lib/safety-doc-status';
 
@@ -9,7 +9,7 @@ import { getSignatureStatusForPermits } from '@/lib/safety-doc-status';
  *                               applicantName,participantCount,createdAt,status,supplemental}], totalCount } }
  */
 export async function GET(req: Request) {
-  const auth = await requireAdmin();
+  const auth = await requirePermission('WORKPERMITS_VIEW');
   if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
