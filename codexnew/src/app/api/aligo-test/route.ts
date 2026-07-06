@@ -1,7 +1,8 @@
 /**
- * src/app/api/_debug/aligo-test/route.ts — 알리고 발송 검증용 임시 라우트 (R-5 0단계)
+ * src/app/api/aligo-test/route.ts — 알리고 발송 검증용 임시 라우트 (R-5 0단계)
  * ⚠️ 임시: R-5 완료 시 이 파일과 /admin/sms-test 페이지를 삭제할 것.
  * SUPER 관리자만 호출 가능(과금/남용 방지).
+ * (주의: 폴더명에 `_` 접두사 금지 — Next.js private 폴더로 라우팅 제외됨)
  */
 
 import { NextResponse } from 'next/server';

@@ -17,7 +17,7 @@ export default function SmsTestPage() {
     setResult('');
     setLoading(true);
     try {
-      const res = await fetch('/api/_debug/aligo-test', {
+      const res = await fetch('/api/aligo-test', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ to: phone }),
