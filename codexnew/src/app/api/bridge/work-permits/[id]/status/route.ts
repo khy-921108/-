@@ -1,0 +1,54 @@
+/**
+ * src/app/api/bridge/work-permits/[id]/status/route.ts — 작업허가 승인/반려 (SHE 포털용)
+ *
+ * [R-2] x-bridge-key 게이트. body {action:'APPROVE'|'REJECT', actor:'<포털 사용자 이메일>'}
+ * - APPROVE → status APPROVED / REJECT → status REJECTED. approved_by/at 기록.
+ * - ⚠️ 승인은 표시·기록용일 뿐 출력(xlsx/A4)을 막지 않음. 다른 필드/출력 로직 무변경.
+ * - 없는 id → 404, 이미 처리된 건(status≠SUBMITTED) → 409.
+ */
+
+import { NextResponse } from 'next/server';
+import { createServiceClient } from '@/lib/supabase/server';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST(req: Request, ctx: { params: { id: string } }) {
+  const key = process.env.BRIDGE_KEY;
+  if (!key) return NextResponse.json({ error: 'BRIDGE_DISABLED' }, { status: 503 });
+  if (req.headers.get('x-bridge-key') !== key) {
+    return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+  }
+
+  const body = await req.json().catch(() => ({}));
+  const action = body.action;
+  const actor = typeof body.actor === 'string' && body.actor ? body.actor : 'portal';
+  if (action !== 'APPROVE' && action !== 'REJECT') {
+    return NextResponse.json({ error: 'INVALID_ACTION' }, { status: 400 });
+  }
+
+  const supabase = createServiceClient();
+  const { data: permit } = await supabase
+    .from('work_permits')
+    .select('id, status')
+    .eq('id', ctx.params.id)
+    .maybeSingle();
+
+  if (!permit) return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 });
+  if (permit.status !== 'SUBMITTED') {
+    return NextResponse.json(
+      { error: 'ALREADY_PROCESSED', currentStatus: permit.status },
+      { status: 409 }
+    );
+  }
+
+  const newStatus = action === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+  const { error } = await supabase
+    .from('work_permits')
+    .update({ status: newStatus, approved_by: actor, approved_at: new Date().toISOString() })
+    .eq('id', ctx.params.id);
+
+  if (error) {
+    return NextResponse.json({ error: 'UPDATE_FAILED', message: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true, status: newStatus });
+}

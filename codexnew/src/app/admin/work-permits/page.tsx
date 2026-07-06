@@ -25,8 +25,28 @@ interface Item {
   participantCount: number;
   supplemental: Record<string, 'Y' | 'N'>;
   status: string;
+  approvedBy?: string | null;
+  approvedAt?: string | null;
   createdAt: string;
   signature?: SigStatus;
+}
+
+/** 승인 상태 뱃지: 대기(회색)/승인(초록)/반려(빨강) */
+function StatusBadge({ status, by, at }: { status: string; by?: string | null; at?: string | null }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    APPROVED: { label: '✅ 승인', cls: 'bg-emerald-100 text-emerald-700' },
+    REJECTED: { label: '⛔ 반려', cls: 'bg-red-100 text-red-700' },
+    SUBMITTED: { label: '⏳ 대기', cls: 'bg-slate-100 text-slate-600' },
+  };
+  const s = map[status] ?? map.SUBMITTED;
+  const tip = (status === 'APPROVED' || status === 'REJECTED') && by
+    ? `${by}${at ? ' · ' + fmtDateTime(at) : ''}`
+    : undefined;
+  return (
+    <span title={tip} className={`rounded-full text-xs font-bold px-2 py-0.5 whitespace-nowrap ${s.cls}`}>
+      {s.label}
+    </span>
+  );
 }
 
 function fmtDateTime(iso: string): string {
@@ -163,6 +183,7 @@ export default function AdminWorkPermitsPage() {
                   <p className="text-xs text-slate-400 mt-0.5">신청일 {formatDate(it.createdAt)}</p>
                 </div>
                 <div className="flex flex-col items-end gap-1 shrink-0">
+                  <StatusBadge status={it.status} by={it.approvedBy} at={it.approvedAt} />
                   {sig && sig.total > 0 && (
                     sig.unsigned === 0 ? (
                       <span className="rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-0.5 whitespace-nowrap">

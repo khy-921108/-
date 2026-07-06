@@ -21,7 +21,7 @@ export async function GET(req: Request) {
   let q = supabase
     .from('work_permits')
     .select(
-      'id, permit_number, permit_type, request_company_name, work_name, work_start, work_end, applicant_name, supplemental, status, created_at'
+      'id, permit_number, permit_type, request_company_name, work_name, work_start, work_end, applicant_name, supplemental, status, approved_by, approved_at, created_at'
     )
     .order('work_start', { ascending: false })
     .limit(500);
@@ -87,6 +87,8 @@ export async function GET(req: Request) {
       participantCount: countMap.get(p.id) ?? 0,
       supplemental: p.supplemental ?? {},
       status: p.status,
+      approvedBy: p.approved_by ?? null,
+      approvedAt: p.approved_at ?? null,
       createdAt: p.created_at,
       signature: {
         total: sig.total,
