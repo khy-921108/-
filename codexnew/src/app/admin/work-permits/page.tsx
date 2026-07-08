@@ -90,7 +90,7 @@ export default function AdminWorkPermitsPage() {
     SUPPLEMENTAL_WORKS.filter((w) => s?.[w.key] === 'Y').map((w) => w.label);
 
   const openDetail = (permitId: string) => {
-    router.push(`/work-permit/print/${permitId}`);
+    router.push(`/admin/work-permits/${permitId}`);
   };
 
   const visibleItems = unsignedOnly
