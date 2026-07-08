@@ -102,7 +102,10 @@ export default function AdminWorkPermitDetailPage() {
             <StatusBadge status={data.status} />
           </h1>
         </div>
-        <a href={`/api/work-permits/${id}/xlsx`} className="btn-secondary text-sm">📥 회사양식 xlsx</a>
+        <div className="flex gap-2">
+          <a href={`/work-permit/print/${id}`} target="_blank" rel="noreferrer" className="btn-secondary text-sm">🖨 인쇄</a>
+          <a href={`/api/work-permits/${id}/xlsx`} className="btn-secondary text-sm">📥 회사양식 xlsx</a>
+        </div>
       </div>
 
       {/* 기본정보 */}
