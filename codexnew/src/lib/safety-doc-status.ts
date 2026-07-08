@@ -353,9 +353,11 @@ export async function getDocsForOutput(
         workArea: u.work_area ?? null,
         issuedAt: u.issued_at ?? null,
         expiresAt: u.expires_at ?? null,
-        managerName: u.manager_name ?? null,
+        managerName: u.manager_name ?? null,   // 관리감독자 = 업체 지정(참여자와 별개, 현행 유지)
         managerPhone: u.manager_phone ?? null,
-        members: Array.isArray(u.members) ? u.members : [],
+        // [R-6] 각서 명단 = 이번 작업 참여자(소장 포함) 기준으로 출력 — 회사 전체 로스터가 아니라
+        //  실제 참여 인원과 동일하게(조율 세션 2026-07-08). 생년월일/전화는 각자 서약 조회값 사용.
+        members: pledges.map((p) => ({ name: p.name, birthDate: p.birthDate, phone: p.phone })),
       };
     }
   }

@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
+import QRCode from 'qrcode';
 import { createServiceClient } from '@/lib/supabase/server';
 import { fillWorkPermitWorkbook, type PermitDocData } from '@/lib/work-permit-template';
 import { getDocsForOutput } from '@/lib/safety-doc-status';
 
-export const runtime = 'nodejs'; // exceljs + 템플릿 파일 읽기
+export const runtime = 'nodejs'; // exceljs + 템플릿 파일 읽기 + qrcode
 
 /**
  * GET /api/work-permits/:id/xlsx  (공개, UUID 알아야) — 회사 양식 자동채움 다운로드
@@ -16,8 +17,10 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     .from('work_permits')
     .select(
       `id, permit_number, request_company_id, request_company_name, work_name, work_location,
-       work_start, work_end, work_content, applicant_name, applicant_title,
-       equipment_no, supplemental, note, created_at`
+       work_start, work_end, work_content, applicant_name, applicant_title, applicant_phone,
+       equipment_no, supplemental, note, created_at, tbm,
+       applicant_signature, issuer_title, issuer_signature, approved_by, approved_at,
+       approver_name, approver_title, approver_signature, approval_mode, approver_signed_at, completion`
     )
     .eq('id', ctx.params.id)
     .maybeSingle();
@@ -48,17 +51,57 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     companyName: p.company_name,
   }));
 
+  // [R-6] 소장(신청인)도 예외 없이 참여자 전원 포함 (조율 세션 확정 2026-07-08).
+  //  "작업 나온 사람은 소장 포함 전원 참여자 → 서약·교육·TBM 명단에 자동 포함".
+  //  신청인을 명단 맨 앞에 합침(이름+전화 중복이면 제외). 소장은 사전에 교육·서약을 거친 상태여야
+  //  서약/교육 서명이 조회됨(작업자와 동일 경로). 소장은 신청인·현장소장 서명에도 추가 등장(정상).
+  const pkey = (n?: string | null, ph?: string | null) =>
+    `${(n ?? '').trim()}|${String(ph ?? '').replace(/\D/g, '')}`;
+  const applicantName = (permit.applicant_name ?? '').trim();
+  const applicantInList = participantList.some(
+    (p) => pkey(p.name, p.phone) === pkey(applicantName, permit.applicant_phone)
+  );
+  const allParticipants =
+    applicantName && !applicantInList
+      ? [
+          { name: applicantName, phone: permit.applicant_phone ?? null, companyName: permit.request_company_name },
+          ...participantList,
+        ]
+      : participantList;
+
   // 1C-2 필수문서 데이터 수집(있으면 출력에 첨부)
   let docs;
   try {
     docs = await getDocsForOutput(supabase, {
       companyId: permit.request_company_id ?? null,
       workStart: permit.work_start,
-      participants: participantList,
+      participants: allParticipants,
     });
   } catch (e) {
     console.error('[work-permits/:id/xlsx] docs fetch:', e);
     docs = undefined; // 문서 수집 실패해도 1C-1 양식은 출력
+  }
+
+  // R-6: TBM 상세 + 현장 사진(Storage 다운로드 → base64) + QR 생성
+  const tbm = (permit.tbm ?? {}) as Record<string, any>;
+  const tbmPhotos: string[] = [];
+  for (const p of Array.isArray(tbm.photos) ? tbm.photos : []) {
+    try {
+      const { data: blob, error: dlErr } = await supabase.storage.from('work-permit-photos').download(p);
+      if (dlErr || !blob) continue;
+      const b64 = Buffer.from(await blob.arrayBuffer()).toString('base64');
+      tbmPhotos.push(`data:image/jpeg;base64,${b64}`);
+    } catch (e) {
+      console.error('[work-permits/:id/xlsx] photo download:', e);
+    }
+  }
+  let qrDataUrl: string | null = null;
+  try {
+    const base = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ?? '';
+    const verifyUrl = base ? `${base}/work-permit/print/${permit.id}` : `WP:${permit.permit_number}`;
+    qrDataUrl = await QRCode.toDataURL(verifyUrl, { margin: 1, width: 220 });
+  } catch (e) {
+    console.error('[work-permits/:id/xlsx] qr:', e);
   }
 
   const docData: PermitDocData = {
@@ -75,10 +118,42 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       equipmentNo: permit.equipment_no,
     },
     supplemental: permit.supplemental ?? {},
-    participants: participantList.map((p) => ({ name: p.name, companyName: p.companyName })),
+    participants: allParticipants.map((p) => ({ name: p.name, companyName: p.companyName })),
     note: permit.note,
     createdAt: permit.created_at,
     docs,
+    // ===== R-6 =====
+    applicantSignature: permit.applicant_signature ?? null,
+    issuer: {
+      name: permit.approved_by ?? null,
+      title: permit.issuer_title ?? null,
+      signature: permit.issuer_signature ?? null,
+      at: permit.approved_at ?? null,
+    },
+    approval: {
+      name: permit.approver_name ?? null,
+      title: permit.approver_title ?? null,
+      signature: permit.approver_signature ?? null,
+      mode: permit.approval_mode ?? null,
+      at: permit.approver_signed_at ?? null,
+    },
+    completion: (permit.completion ?? {}) as PermitDocData['completion'],
+    tbmExtra: {
+      workContent: tbm.workContent ?? null,
+      riskFactors: Array.isArray(tbm.riskFactors) ? tbm.riskFactors : [],
+      safetyMeasures: Array.isArray(tbm.safetyMeasures) ? tbm.safetyMeasures : [],
+      teamLeaderSignature: tbm.teamLeader?.signature ?? null,
+      safetyManager: tbm.safetyManager
+        ? {
+            name: tbm.safetyManager.name ?? null,
+            signature: tbm.safetyManager.signature ?? null,
+            company: tbm.safetyManager.company ?? null,
+          }
+        : null,
+      confirmations: tbm.confirmations ?? {},
+    },
+    tbmPhotos,
+    qrDataUrl,
   };
 
   let buffer: Buffer;

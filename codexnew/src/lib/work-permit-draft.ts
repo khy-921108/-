@@ -39,6 +39,29 @@ export interface WpDraft {
   };
   supplemental?: Record<string, 'Y' | 'N'>;
   participants?: WpParticipant[];
+  // ===== R-6: 승인 규칙 / 디지털 서명 / TBM 상세 =====
+  /** 승인자 = 요청·주관부서 현장 책임자(차장/대리). 서명은 후속 승인 단계에서 저장 가능. */
+  approval?: {
+    approverName?: string;
+    approverTitle?: string;
+    approvalMode?: 'SITE' | 'REMOTE';
+  };
+  /** TBM 디지털 기록 상세(양식 ▶작업내용/위험요인/안전대책 + 안전관리자) */
+  tbmDetail?: {
+    workContent?: string;
+    riskFactors?: string[];
+    safetyMeasures?: string[];
+    safetyManagerName?: string;
+    /** 안전관리자 소속: 사내(동남) | 작업업체 */
+    safetyManagerAffiliation?: 'INTERNAL' | 'CONTRACTOR';
+  };
+  /** 디지털 서명(PNG data URL). 신청인 서명은 TBM 팀장 서명으로도 사용. */
+  signatures?: {
+    applicant?: string;
+    safetyManager?: string;
+  };
+  /** TBM 현장 사진(PNG/JPEG data URL, 최대 4장) */
+  photos?: string[];
 }
 
 const KEY = 'wpDraft';

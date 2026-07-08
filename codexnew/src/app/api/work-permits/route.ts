@@ -25,6 +25,21 @@ export async function POST(req: Request) {
     const info = body.info ?? {};
     const supplementalIn = body.supplemental ?? {};
     const participantsIn: any[] = Array.isArray(body.participants) ? body.participants : [];
+    // ---- R-6: 승인/서명/TBM 상세 입력 ----
+    const approvalIn = body.approval ?? {};
+    const tbmDetailIn = body.tbmDetail ?? {};
+    const signaturesIn = body.signatures ?? {};
+    const photosIn: string[] = Array.isArray(body.photos) ? body.photos : [];
+    const isDataUrl = (v: any): v is string => typeof v === 'string' && v.startsWith('data:image/');
+    const approverName = (approvalIn.approverName ?? '').trim() || null;
+    const approverTitle = (approvalIn.approverTitle ?? '').trim() || null;
+    const approvalMode = approvalIn.approvalMode === 'SITE' || approvalIn.approvalMode === 'REMOTE'
+      ? approvalIn.approvalMode
+      : null;
+    const applicantSignature = isDataUrl(signaturesIn.applicant) ? signaturesIn.applicant : null;
+    const safetyManagerSignature = isDataUrl(signaturesIn.safetyManager) ? signaturesIn.safetyManager : null;
+    const asStrArray = (v: any): string[] =>
+      Array.isArray(v) ? v.map((x) => (x ?? '').toString()).filter((s) => s.trim()) : [];
 
     // ---- 1. 필수값 검증 ----
     const workName = (info.workName ?? '').trim();
@@ -165,14 +180,28 @@ export async function POST(req: Request) {
       supplemental[k] = supplementalIn?.[k] === 'Y' ? 'Y' : 'N';
     }
 
-    // ---- 5. TBM 스냅샷 (헤더 + 참석자) ----
+    // ---- 5. TBM 스냅샷 (헤더 + 참석자 + R-6 디지털 상세) ----
+    const safetyManagerName = (tbmDetailIn.safetyManagerName ?? '').trim() || null;
+    // 안전관리자 소속: 사내(동남) 또는 작업업체 — UI 토글 값
+    const smCompany =
+      tbmDetailIn.safetyManagerAffiliation === 'CONTRACTOR' ? company.name : '동남';
     const tbm = {
       datetime: workStart,
       place: workLocation,
       workName,
-      teamLeader: { company: company.name, name: applicantName },
+      // 현장소장/안전담당 = 신청인. 신청인 서명을 TBM 실시자 서명으로 사용.
+      teamLeader: { company: company.name, name: applicantName, signature: applicantSignature },
+      safetyManager: safetyManagerName
+        ? { name: safetyManagerName, company: smCompany, signature: safetyManagerSignature }
+        : null,
+      workContent: (tbmDetailIn.workContent ?? '').trim() || null,
+      riskFactors: asStrArray(tbmDetailIn.riskFactors).slice(0, 6),
+      safetyMeasures: asStrArray(tbmDetailIn.safetyMeasures).slice(0, 6),
       attendees: evaluated.map((e) => ({ name: e.name, company: e.companyName })),
+      // 사진은 Storage 업로드 후 경로로 채운다(아래). 초기엔 빈 배열.
+      photos: [] as string[],
     };
+    const photoDataUrls = photosIn.filter(isDataUrl).slice(0, 2);
 
     // ---- 6. 신청번호 RPC + 충돌 재시도(≤3) → work_permits INSERT ----
     let permit: any = null;
@@ -204,6 +233,11 @@ export async function POST(req: Request) {
           equipment_no: equipmentNo,
           tbm,
           supplemental,
+          // R-6: 신청인 서명 + 승인자(요청부서 현장책임자) 정보. 승인자 서명은 후속 단계.
+          applicant_signature: applicantSignature,
+          approver_name: approverName,
+          approver_title: approverTitle,
+          approval_mode: approvalMode,
           status: 'SUBMITTED',
         })
         .select('id, permit_number, status, created_at')
@@ -255,6 +289,33 @@ export async function POST(req: Request) {
         { success: false, code: 'SAVE_FAILED', message: '참여자 저장에 실패했습니다. 다시 시도해 주세요.' },
         { status: 500 }
       );
+    }
+
+    // ---- 7.5 TBM 현장 사진 Storage 업로드(비공개 버킷) → tbm.photos = 경로 ----
+    if (photoDataUrls.length > 0) {
+      const paths: string[] = [];
+      for (let i = 0; i < photoDataUrls.length; i++) {
+        const m = photoDataUrls[i].match(/^data:image\/(\w+);base64,(.+)$/);
+        if (!m) continue;
+        const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+        const buf = Buffer.from(m[2], 'base64');
+        const key = `permits/${permit.id}/${i}.${ext}`;
+        const { error: upErr } = await supabase.storage
+          .from('work-permit-photos')
+          .upload(key, buf, { contentType: `image/${m[1]}`, upsert: true });
+        if (upErr) {
+          console.error('[work-permits POST] photo upload failed:', upErr);
+        } else {
+          paths.push(key);
+        }
+      }
+      if (paths.length > 0) {
+        const { error: tbmErr } = await supabase
+          .from('work_permits')
+          .update({ tbm: { ...tbm, photos: paths } })
+          .eq('id', permit.id);
+        if (tbmErr) console.error('[work-permits POST] tbm photos patch failed:', tbmErr);
+      }
     }
 
     // [R-5] 담당자 알림 — 작업허가 신청 접수 (best-effort, 담당자 폰 = 발신번호와 동일)

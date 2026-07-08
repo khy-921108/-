@@ -14,11 +14,12 @@
 import path from 'path';
 import ExcelJS from 'exceljs';
 import { SUPPLEMENTAL_WORKS } from './work-permit-constants';
-import { WORK_TYPES, type WorkTypeHeaderCells } from './work-permit-types';
+import { WORK_TYPES, type WorkTypeDef } from './work-permit-types';
 import type { DocsOutput } from './safety-doc-status';
 
 export const SHEET_GENERAL = '2_일반위험작업허가서';
 export const SHEET_TBM = '1_TBM(작업전안전미팅)';
+export const SHEET_TBM_PHOTO = '1-2_TBM현장사진';
 export const SHEET_PLEDGE = '8_안전준수서약(개인)';
 export const SHEET_UNDERTAKING = '9_안전작업이행각서(업체)';
 export const SHEET_EDU = '7_교육훈련결과서';
@@ -52,14 +53,29 @@ export const TEMPLATE_CELLS = {
     etc: 'A35', // A35:I35 기타 특별사항
     // 보충작업 체크는 SUPPLEMENTAL_WORKS[].cell/token 으로 처리
   },
+  // R-6 개정 구조(5행 아래 1행 삽입 → 6행 신설, 이하 전부 +1)
   tbm: {
     datetime: 'B3', // B3:C3
     place: 'G3', // G3:I3
     workName: 'B4', // B4:I4
-    teamLeader: 'B5', // B5:D5 (프리필 '소속: 성명: (서명)')
-    // 참석자 그리드: 좌 행30~41(성명 B/소속 C/서명 D), 우 행30~41(성명 G/소속 H/서명 I)
-    participantRowStart: 30,
-    participantRowEnd: 41, // 12행 × 2열 = 24칸
+    company: 'C5', // 작업업체 (라벨 A5:B5, 값 C5:D5) — 자동 채움(ⓓ)
+    smAffiliation: 'G5', // 안전관리자 소속 (G5:I5) — v5 템플릿에 "동남" 고정 프리필, 코드 미사용(ⓓ)
+    leaderName: 'C6', // 현장소장/안전담당 성명 (라벨 A6:B6, 값 C6)
+    leaderSig: 'D6', // 서명칸
+    smName: 'G6', // 안전관리자 성명 (G6:H6)
+    smSig: 'I6', // 서명칸
+    contentRowStart: 9, // 작업내용 B / 위험요인 D / 안전대책 F (행 9~14)
+    contentRowEnd: 14,
+    // 참석자 그리드: 좌 행31~42(성명 B/소속 C/서명 D), 우 행31~42(성명 G/소속 H/서명 I)
+    participantRowStart: 31,
+    participantRowEnd: 42, // 12행 × 2열 = 24칸
+  },
+  // 1-2_TBM현장사진 (사용자 설계: TBM 연장 페이지 스타일, 대형 사진칸 2개. 사진 없으면 시트 제거)
+  tbmPhoto: {
+    datetime: 'B3', // 일시 (B3:C3)
+    place: 'G3', // 장소 (G3:I3)
+    anchors: ['A5', 'A17'], // 사진칸 ①(A5:I15) ②(A17:I27) 좌상단
+    maxPhotos: 2,
   },
 } as const;
 
@@ -85,6 +101,28 @@ export interface PermitDocData {
   note?: string | null;
   createdAt: string; // ISO
   docs?: DocsOutput; // 1C-2 필수문서(있으면 시트 8 N장·9·7 채움)
+  // ===== R-6: 디지털 서명 / 승인 / TBM 상세 / QR (없으면 공란) =====
+  applicantSignature?: string | null;
+  /** 발급자 = 안전환경담당(gate ③에서 캡처, 없으면 공란) */
+  issuer?: { name: string | null; title: string | null; signature: string | null; at: string | null } | null;
+  /** 승인자 = 요청·주관부서 현장 책임자(직책/성명은 신청 시, 서명은 gate ③) */
+  approval?: { name: string | null; title: string | null; signature: string | null; mode: string | null; at: string | null } | null;
+  /** 작업완료 확인(종료란) — gate ③, 없으면 공란 */
+  completion?: { completedAt?: string; workerSignature?: string; restoreState?: string; witnessName?: string } | null;
+  /** TBM 디지털 상세 + 참여자 확인 스탬프 */
+  tbmExtra?: {
+    workContent?: string | null;
+    riskFactors?: string[];
+    safetyMeasures?: string[];
+    teamLeaderSignature?: string | null;
+    safetyManager?: { name: string | null; signature: string | null; company?: string | null } | null;
+    /** 참여자 확인: key(name||normPhone) → { name, signature, confirmedAt } */
+    confirmations?: Record<string, { name: string; signature: string; confirmedAt: string }>;
+  } | null;
+  /** TBM 현장 사진(Storage에서 라우트가 해석한 base64 data URL) */
+  tbmPhotos?: string[];
+  /** 시트2 QR(허가번호+검증 URL) — 라우트가 생성한 PNG data URL */
+  qrDataUrl?: string | null;
 }
 
 // ===== KST 포맷터 (ICU 비의존: UTC+9 수동) =====
@@ -113,6 +151,42 @@ function setCell(ws: ExcelJS.Worksheet, addr: string, value: string, multiline =
   if (multiline) {
     const prev = cell.alignment ?? {};
     cell.alignment = { ...prev, wrapText: true, vertical: 'top' };
+  }
+}
+
+/** 셀 주소 → 0-indexed {col,row} (A=0, 1행=0) */
+function anchorColRow(addr: string): { col: number; row: number } {
+  const m = /^([A-Z]+)(\d+)$/.exec(addr);
+  if (!m) return { col: 0, row: 0 };
+  let col = 0;
+  for (const ch of m[1]) col = col * 26 + (ch.charCodeAt(0) - 64);
+  return { col: col - 1, row: parseInt(m[2], 10) - 1 };
+}
+
+/** 디지털 서명/사진/QR 이미지를 특정 셀 기준으로 앉힘(병합·셀값 불변, 위에 오버레이). */
+function placeImage(
+  wb: ExcelJS.Workbook,
+  ws: ExcelJS.Worksheet,
+  dataUrl: string | null | undefined,
+  addr: string,
+  w: number,
+  h: number,
+  dx = 0,
+  dy = 0
+) {
+  if (!dataUrl || !dataUrl.startsWith('data:image/')) return;
+  const m = /^data:image\/(\w+);base64,(.+)$/.exec(dataUrl);
+  if (!m) return;
+  try {
+    const ext = (m[1] === 'jpg' ? 'jpeg' : m[1]) as 'png' | 'jpeg' | 'gif';
+    const imageId = wb.addImage({ base64: m[2], extension: ext });
+    const { col, row } = anchorColRow(addr);
+    ws.addImage(imageId, {
+      tl: { col: col + dx, row: row + dy },
+      ext: { width: w, height: h },
+    } as any);
+  } catch (e) {
+    console.error('[placeImage] failed:', addr, e);
   }
 }
 
@@ -195,29 +269,41 @@ function fillPledgeSheet(wb: ExcelJS.Workbook, ws: ExcelJS.Worksheet, p: DocsOut
   ws.getCell(C.jobType).value = p.jobType ?? '';
   ws.getCell(C.workDate).value = p.workDate ? fmtDate(p.workDate) : '';
 
-  // 디지털 서명 이미지 — 하단 서명블록(A24:F25)의 '(서명)' 영역 근처에 앉힘
-  if (p.signature && p.signature.startsWith('data:image/')) {
-    try {
-      const base64 = p.signature.replace(/^data:image\/\w+;base64,/, '');
-      const imageId = wb.addImage({ base64, extension: 'png' });
-      // tl/ext: 0-indexed col/row + 픽셀 크기. 하단 'A24:F25' 병합칸의 3번째 줄(서약자·(서명)) 위에 앉힘.
-      ws.addImage(imageId, {
-        tl: { col: 3.5, row: 24.25 },
-        ext: { width: 120, height: 30 },
-      } as any);
-    } catch (e) {
-      console.error('[pledge] signature image embed failed:', e);
+  // 하단 서약블록(A24:D25): 서명일 + 소속(업체명) + 서약자(성명) 자동 표기
+  {
+    const cell = ws.getCell('A24');
+    let raw = typeof cell.value === 'string' ? cell.value : String(cell.value ?? '');
+    if (p.workDate) {
+      const k = toKST(p.workDate);
+      raw = raw.replace(/20\s+년\s+월\s+일/, `${k.getUTCFullYear()}년 ${pad(k.getUTCMonth() + 1)}월 ${pad(k.getUTCDate())}일`);
     }
+    raw = raw.replace(/소속:\s*/, `소속: ${p.companyName ?? ''}          `);
+    raw = raw.replace(/서약자:\s*$/, `서약자: ${p.name}`);
+    cell.value = raw;
   }
+
+  // 디지털 서명 — 전용 칸(E24:F25)
+  placeImage(wb, ws, p.signature, 'E24', 110, 28, 0.2, 0.5);
 }
 
-/** 이행각서 1장 채움 */
-function fillUndertakingSheet(ws: ExcelJS.Worksheet, u: NonNullable<DocsOutput['undertaking']>) {
+/** 이행각서 1장 채움 (참여인원 서명 = 서약 서명 재사용, 현장소장 = 신청인 서명) */
+function fillUndertakingSheet(
+  wb: ExcelJS.Workbook,
+  ws: ExcelJS.Worksheet,
+  u: NonNullable<DocsOutput['undertaking']>,
+  sigByName: Map<string, string>,
+  signer?: { name?: string | null; signature?: string | null; date?: string | null },
+  workDateIso?: string
+) {
   const C = DOC_CELLS.undertaking;
   ws.getCell(C.company).value = `◎ 소속사명 : ${u.companyName ?? ''}`;
   ws.getCell(C.area).value = `◎ 작업구역 : ${u.workArea ?? ''}`;
-  const period =
-    u.issuedAt && u.expiresAt ? `${fmtDate(u.issuedAt)} ~ ${fmtDate(u.expiresAt)}` : '';
+  // R-6 ⓒ: 출입기간 = 작업일 당일 (각서 유효기간 6개월과 무관하게, 이 허가건의 출입은 당일)
+  const period = workDateIso
+    ? `${fmtDate(workDateIso)} (당일)`
+    : u.issuedAt && u.expiresAt
+      ? `${fmtDate(u.issuedAt)} ~ ${fmtDate(u.expiresAt)}`
+      : '';
   ws.getCell(C.period).value = `◎ 출입기간 : ${period}`;
   ws.getCell(C.manager).value = `◎ 관리감독자 : ${u.managerName ?? ''}        연락처 : ${u.managerPhone ?? ''}`;
   const cap = C.memberRowEnd - C.memberRowStart + 1; // 10
@@ -226,67 +312,129 @@ function fillUndertakingSheet(ws: ExcelJS.Worksheet, u: NonNullable<DocsOutput['
     ws.getCell(`B${r}`).value = m.name ?? '';
     ws.getCell(`C${r}`).value = birthFront(m.birthDate);
     ws.getCell(`D${r}`).value = m.phone ?? '';
-    // 서명 E / 비고 F 빈칸
+    // 서명 E: 서약 서명 재사용(있으면), 없으면 공란. 비고 F 빈칸.
+    const sig = sigByName.get((m.name ?? '').trim());
+    if (sig) placeImage(wb, ws, sig, `E${r}`, 70, 18, 0.05, 0.1);
   });
-  // 대표/현장소장 인(A29) 미변경 — 현장
+  // 대표/현장소장(A29:F30): 날짜 자동 표기 + 신청인(=업체 현장소장) 성명·서명 연동
+  {
+    const cell = ws.getCell('A29');
+    let raw = typeof cell.value === 'string' ? cell.value : String(cell.value ?? '');
+    if (signer?.date) {
+      const k = toKST(signer.date);
+      raw = raw.replace(
+        /20\s+년\s+월\s+일/,
+        `${k.getUTCFullYear()}년 ${pad(k.getUTCMonth() + 1)}월 ${pad(k.getUTCDate())}일`
+      );
+    }
+    raw = raw.replace(/현장소장:\s*$/, `현장소장: ${signer?.name ?? ''}`);
+    cell.value = raw;
+  }
+  // 현장소장 서명 — 전용 칸(E29:F30, '(인)' 고스트 위)
+  placeImage(wb, ws, signer?.signature, 'E29', 100, 26, 0.25, 0.5);
 }
 
-/** 교육결과서 1장 채움 */
-function fillEduSheet(ws: ExcelJS.Worksheet, e: DocsOutput['eduResult']) {
+/** 교육결과서 1장 채움 (대상자 서명 = 서약 서명 재사용, 실시자 = TBM 실시자) */
+function fillEduSheet(
+  wb: ExcelJS.Workbook,
+  ws: ExcelJS.Worksheet,
+  e: DocsOutput['eduResult'],
+  sigByName: Map<string, string>,
+  instructor?: { name?: string | null; signature?: string | null }
+) {
   const C = DOC_CELLS.edu;
   ws.getCell(C.datetime).value = `1. 교육 일시 : ${e.date ? fmtDate(e.date) : ''}`;
   ws.getCell(C.content).value = `2. 교육 내용 : ${e.content ?? ''}`;
   const leftCap = C.leftRowEnd - C.leftRowStart + 1; // 24
   e.names.forEach((nm, i) => {
+    const sig = sigByName.get((nm ?? '').trim());
     if (i < leftCap) {
-      ws.getCell(`B${C.leftRowStart + i}`).value = nm;
+      const r = C.leftRowStart + i;
+      ws.getCell(`B${r}`).value = nm;
+      if (sig) placeImage(wb, ws, sig, `C${r}`, 60, 16, 0.05, 0.1); // 서명 C
     } else {
       const idx = i - leftCap;
       if (idx < (C.rightRowEnd - C.rightRowStart + 1)) {
-        ws.getCell(`E${C.rightRowStart + idx}`).value = nm;
+        const r = C.rightRowStart + idx;
+        ws.getCell(`E${r}`).value = nm;
+        if (sig) placeImage(wb, ws, sig, `F${r}`, 60, 16, 0.05, 0.1); // 서명 F
       }
     }
-    // 서명 빈칸
   });
-  // 실시자(A32) 미변경 — 현장
+  // 교육 실시자 = TBM 실시자 — 텍스트 A32:C32 + 서명칸 D32:F32
+  if (instructor?.name) {
+    const cell = ws.getCell('A32');
+    cell.value = `교육 실시자              성명: ${instructor.name}`;
+    cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: false, shrinkToFit: true };
+    placeImage(wb, ws, instructor.signature, 'D32', 80, 18, 0.3, 0.1);
+  }
 }
 
 /** 필수문서 시트 채움: 개인서약 N장(시트 복제) + 이행각서 1장 + 교육결과서 1장 */
-function fillDocSheets(wb: ExcelJS.Workbook, docs: DocsOutput) {
-  // 개인서약: 원본 시트를 1번 참여자용으로 쓰고, 2번부터는 복제
-  const pledgeSrc = wb.getWorksheet(SHEET_PLEDGE);
-  if (pledgeSrc && docs.pledges.length > 0) {
-    pledgeSrc.name = `${SHEET_PLEDGE}(1)`;
-    fillPledgeSheet(wb, pledgeSrc, docs.pledges[0]);
-    for (let i = 1; i < docs.pledges.length; i++) {
-      const clone = cloneWorksheet(wb, pledgeSrc, `${SHEET_PLEDGE}(${i + 1})`);
-      fillPledgeSheet(wb, clone, docs.pledges[i]);
+function fillDocSheets(wb: ExcelJS.Workbook, docs: DocsOutput, data: PermitDocData) {
+  // 이름 → 서약 서명 맵(교육결과서·이행각서 서명 재사용용)
+  const sigByName = new Map<string, string>();
+  for (const p of docs.pledges) {
+    if (p.signature && p.signature.startsWith('data:image/')) {
+      sigByName.set((p.name ?? '').trim(), p.signature);
     }
   }
-  // 이행각서
+  // 개인서약: **미기입 원본을 먼저 N-1장 복제한 뒤** 각 장을 채운다.
+  //  - 기입 후 복제하면 A24 서명블록(서명일·소속·서약자)이 첫 참여자로 고정되는 버그(R-6 ⓔ)
+  //  - 템플릿(v5 클린)에서 서약 시트가 맨 뒤(각서 다음)라 복제본이 끝에 붙어도
+  //    서약끼리 연속 배치된다(R-6 ⓑ: 각서 | 서약(1) | 서약(2) | …)
+  const pledgeSrc = wb.getWorksheet(SHEET_PLEDGE);
+  if (pledgeSrc && docs.pledges.length > 0) {
+    const pledgeSheets: ExcelJS.Worksheet[] = [pledgeSrc];
+    for (let i = 1; i < docs.pledges.length; i++) {
+      pledgeSheets.push(cloneWorksheet(wb, pledgeSrc, `${SHEET_PLEDGE}(${i + 1})`));
+    }
+    pledgeSrc.name = `${SHEET_PLEDGE}(1)`;
+    pledgeSheets.forEach((sheet, i) => fillPledgeSheet(wb, sheet, docs.pledges[i]));
+  }
+  // 이행각서 — 현장소장 = 신청인(업체 현장소장) 서명·날짜, 출입기간 = 작업일 당일(ⓒ)
   const us = wb.getWorksheet(SHEET_UNDERTAKING);
-  if (us && docs.undertaking) fillUndertakingSheet(us, docs.undertaking);
-  // 교육결과서
+  if (us && docs.undertaking) {
+    fillUndertakingSheet(
+      wb,
+      us,
+      docs.undertaking,
+      sigByName,
+      {
+        name: data.info.applicantName,
+        signature: data.applicantSignature,
+        date: data.createdAt,
+      },
+      data.info.workStart
+    );
+  }
+  // 교육결과서 — 실시자 = TBM 실시자(신청인)
   const es = wb.getWorksheet(SHEET_EDU);
-  if (es) fillEduSheet(es, docs.eduResult);
+  if (es) {
+    fillEduSheet(wb, es, docs.eduResult, sigByName, {
+      name: data.info.applicantName,
+      signature: data.tbmExtra?.teamLeaderSignature ?? data.applicantSignature,
+    });
+  }
 }
 
-/** 1C-3 보충작업 별지: 종류별 시트 공통 헤더만 채움(안전조치·측정·서명은 빈칸=현장). */
+/** 1C-3 보충작업 별지: 종류별 시트 공통 헤더 채움 + 신청인 서명 + 작업완료 연동. 부서 확인자는 미연동(현장/앱). */
 function fillSupplementalHeader(
+  wb: ExcelJS.Workbook,
   ws: ExcelJS.Worksheet,
-  cells: WorkTypeHeaderCells,
+  t: WorkTypeDef,
   data: PermitDocData
 ) {
+  const cells = t.cells;
   const info = data.info;
   const title = (info.applicantTitle ?? '').trim();
   setCell(ws, cells.permitNumber, data.permitNumber);
   setCell(ws, cells.permitDate, fmtDate(data.createdAt));
-  setCell(
-    ws,
-    cells.applicant,
-    `직책: ${title}    성명: ${info.applicantName}                    (서명)`
-  );
-  setCell(ws, cells.period, `${fmtDateTime(info.workStart)} ~ ${fmtTime(info.workEnd)}`);
+  setCell(ws, cells.applicant, `직책: ${title}    성명: ${info.applicantName}`);
+  // 신청인 서명 — 전용 칸(H:I)
+  const appRow = cells.applicant.replace(/[A-Z]+/, '');
+  placeImage(wb, ws, data.applicantSignature, `H${appRow}`, 84, 20, 0.1, 0.05);
+  setCell(ws, cells.period, `${fmtDateTime(info.workStart)} ~ ${fmtTime(info.workEnd)} (당일)`);
   setCell(
     ws,
     cells.location,
@@ -299,7 +447,17 @@ function fillSupplementalHeader(
     `[업체] ${data.companyName} / [작업명] ${info.workName}\n${info.workContent}`,
     true
   );
-  // ※ 관련 작업허가 체크·안전조치·가스측정·서명란은 손대지 않음(현장).
+
+  // R-6: 작업완료 확인 — 마스터와 동일하게 완료시간 + 작업자(신청인) + 작업자 서명 자동채움.
+  //  (부서 확인자 서명은 부서확인 연동 전까지 칸 그대로.)
+  const comp = data.completion;
+  if (comp && (comp.completedAt || comp.workerSignature)) {
+    if (comp.completedAt) {
+      setCell(ws, t.done.info, `완료시간: ${fmtDateTime(comp.completedAt)}    작업자: ${info.applicantName}`);
+    }
+    placeImage(wb, ws, comp.workerSignature ?? data.applicantSignature, t.done.workerSig, 72, 18, 0.05, 0.1);
+  }
+  // ※ 관련 작업허가 체크·안전조치·가스측정·확인자(부서) 서명란은 손대지 않음(부서확인 슬라이스).
 }
 
 /**
@@ -312,7 +470,7 @@ function applySupplementalSheets(wb: ExcelJS.Workbook, data: PermitDocData) {
     const ws = wb.getWorksheet(t.sheet);
     if (!ws) continue; // 시트 없으면 스킵(템플릿 변경 대비)
     if (supp[t.key] === 'Y') {
-      fillSupplementalHeader(ws, t.cells, data);
+      fillSupplementalHeader(wb, ws, t, data);
     } else {
       // 미체크 종류는 출력에서 제거
       try {
@@ -352,11 +510,11 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
     G.applicant,
     `직책: ${title}    성명: ${info.applicantName}                    (서명)`
   );
-  // 허가기간: 시작 전체 ~ 종료 시각
+  // 허가기간: 시작 전체 ~ 종료 시각 — 당일 원칙 명시
   setCell(
     gs,
     G.period,
-    `${fmtDateTime(info.workStart)} ~ ${fmtTime(info.workEnd)}`
+    `${fmtDateTime(info.workStart)} ~ ${fmtTime(info.workEnd)} (당일)`
   );
   // 작업장소·장치(멀티라인) — 프리필 구조 유지
   setCell(
@@ -371,17 +529,82 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
   // 보충작업 체크
   applySupplementalChecks(gs, data.supplemental ?? {});
 
-  // ===== TBM (헤더·참석자만) =====
+  // ===== R-6 시트2 결재란: 서명 = 전용 칸 (텍스트부와 분리) =====
+  // 신청인: 텍스트 B3:G3 + 서명칸 H3:I3
+  placeImage(wb, gs, data.applicantSignature, 'H3', 84, 20, 0.1, 0.05);
+  // A37 승인자(요청부서 현장책임자) — 부서/직책 + 성명만. 서명칸 D37은 gate ③.
+  // (승인 방식 SITE/REMOTE 는 DB에만 기록, 출력물엔 표기하지 않음 — 사용자 지시 2026-07-08)
+  if (data.approval?.name || data.approval?.title) {
+    setCell(gs, 'A37', `승인자(요청부서 현장책임자)   ${data.approval?.title ?? ''}  ${data.approval?.name ?? ''}`);
+    placeImage(wb, gs, data.approval?.signature, 'D37', 76, 18, 0.05, 0.1);
+  }
+  // A38 발급자(안전환경담당) — 서명칸 D38, gate ③
+  if (data.issuer?.name) {
+    setCell(gs, 'A38', `발급자(안전환경담당)   성명: ${data.issuer.name}`);
+    placeImage(wb, gs, data.issuer.signature, 'D38', 76, 18, 0.05, 0.1);
+  }
+  // A39 입회자 / A40 관련부서 협조자 = '(해당 시)' — 데이터 없음, 서명칸 공란 유지
+  // E37 완료시간+작업자(서명칸 I37) / E38 확인자+복원상태(서명칸 I38) — gate ③
+  const comp = data.completion;
+  if (comp && (comp.completedAt || comp.workerSignature || comp.restoreState)) {
+    // 작업완료 수행 주체 = 신청인 → '작업자:' 옆에 신청인 성명 표기(서명은 I37)
+    if (comp.completedAt) {
+      setCell(gs, 'E37', `완료시간: ${fmtDateTime(comp.completedAt)}    작업자: ${data.info.applicantName}`);
+    }
+    placeImage(wb, gs, comp.workerSignature, 'I37', 72, 18, 0.05, 0.1);
+    if (comp.restoreState || data.approval?.name) {
+      setCell(gs, 'E38', `확인자(현장책임자): ${data.approval?.name ?? ''}`);
+      // 확인자 = 승인자와 동일인 → 승인자 서명 재사용
+      placeImage(wb, gs, data.approval?.signature, 'I38', 72, 18, 0.05, 0.1);
+    }
+    // 복원상태·입회 특이사항 → 특이사항 칸(G39:I40)
+    const etcNotes: string[] = [];
+    if (comp.restoreState) etcNotes.push(`복원(조치)상태: ${comp.restoreState}`);
+    if (comp.witnessName) etcNotes.push(`입회: ${comp.witnessName}`);
+    if (etcNotes.length > 0) setCell(gs, 'G39', etcNotes.join(' / '), true);
+  }
+  // A41 작업허가 연장 — 텍스트 A41:H41 + 서명칸 I41 (연장 데이터는 현장 수기)
+  // QR(허가번호+검증 URL) — 우상단 모서리(허가일자 값 가림 방지: I열 우측 끝)
+  placeImage(wb, gs, data.qrDataUrl, 'I1', 46, 46, 0.35, 0.05);
+
+  // ===== TBM (R-6 개정: 2줄 헤더 — 작업업체/현장소장·안전담당 + 안전관리자 소속/성명) =====
   setCell(ts, T.datetime, fmtDateTime(info.workStart));
   setCell(ts, T.place, info.workLocation);
   setCell(ts, T.workName, info.workName);
-  setCell(
-    ts,
-    T.teamLeader,
-    `소속: ${data.companyName}    성명: ${info.applicantName}             (서명)`
-  );
+  setCell(ts, T.company, data.companyName); // 작업업체(자동)
 
-  // 참석자 그리드 — 좌12·우12 (서명 공란)
+  const te = data.tbmExtra;
+  // 현장소장/안전담당 = 신청인. 서명은 전용 칸(D6).
+  setCell(ts, T.leaderName, info.applicantName);
+  placeImage(wb, ts, te?.teamLeaderSignature ?? data.applicantSignature, T.leaderSig, 74, 20, 0.1, 0.05);
+  // 안전관리자(사내 확인·결재) — 성명(G6) + 서명칸(I6). 미확인 시 공란.
+  // R-6 ⓓ: 소속(G5)은 발주사 "동남" 고정 — v5 템플릿 프리필 그대로, 코드에서 덮어쓰지 않음.
+  const sm = te?.safetyManager;
+  if (sm?.name) {
+    setCell(ts, T.smName, sm.name);
+    placeImage(wb, ts, sm.signature, T.smSig, 74, 20, 0.1, 0.05);
+  }
+  // ▶ 작업내용(행 9~14에 줄 단위 분배: 잘림 방지) / 위험요인 / 안전대책
+  const rs = T.contentRowStart;
+  if (te?.workContent) {
+    const words = te.workContent.replace(/\s+/g, ' ').trim();
+    const lines: string[] = [];
+    for (let s = 0; s < words.length && lines.length < 6; s += 11) {
+      lines.push(words.slice(s, s + 11));
+    }
+    lines.forEach((ln, i) => setCell(ts, `B${rs + i}`, ln));
+  }
+  (te?.riskFactors ?? []).slice(0, 6).forEach((rf, i) => setCell(ts, `D${rs + i}`, rf));
+  (te?.safetyMeasures ?? []).slice(0, 6).forEach((mz, i) => setCell(ts, `F${rs + i}`, mz));
+  // 참여자 확인 스탬프 맵 (name → signature)
+  const confByName = new Map<string, string>();
+  for (const c of Object.values(te?.confirmations ?? {})) {
+    if (c?.signature && c.signature.startsWith('data:image/')) {
+      confByName.set((c.name ?? '').trim(), c.signature);
+    }
+  }
+
+  // 참석자 그리드 — 좌12·우12 (서명 = 참여자 확인 스탬프, 미확인 공란)
   const ps = data.participants ?? [];
   const rows = T.participantRowEnd - T.participantRowStart + 1; // 12
   const capacity = rows * 2; // 24
@@ -397,8 +620,24 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
     const compCol = left ? 'C' : 'H';
     ts.getCell(`${nameCol}${r}`).value = p.name ?? '';
     ts.getCell(`${compCol}${r}`).value = p.companyName ?? '';
-    // 서명 D/I 공란
+    // 서명 D/I = 참여자 확인 스탬프(있으면), 미확인 공란
+    const csig = confByName.get((p.name ?? '').trim());
+    if (csig) placeImage(wb, ts, csig, `${left ? 'D' : 'I'}${r}`, 55, 16, 0.05, 0.1);
   });
+
+  // ----- R-6 TBM 실시 사진 → 별지 '1-2_TBM현장사진' (대형 2칸) -----
+  // 사용자 확정(2026-07-08): 사진이 없어도 시트는 **무조건 포함**(빈 칸으로 출력 → 현장 부착).
+  const PC = TEMPLATE_CELLS.tbmPhoto;
+  const tbmPhotosArr = (data.tbmPhotos ?? []).slice(0, PC.maxPhotos);
+  const photoSheet = wb.getWorksheet(SHEET_TBM_PHOTO);
+  if (photoSheet) {
+    setCell(photoSheet, PC.datetime, fmtDateTime(info.workStart));
+    setCell(photoSheet, PC.place, info.workLocation);
+    // 16:9 크롭된 사진 → 칸 높이에 맞춰 372×210 (왜곡 없음). 없으면 빈 칸 그대로.
+    tbmPhotosArr.forEach((ph, i) => {
+      placeImage(wb, photoSheet, ph, PC.anchors[i], 372, 210, 0.85, 0.2);
+    });
+  }
 
   // 기타 특별사항: note + 참여자 초과분
   const etcParts: string[] = [];
@@ -410,7 +649,7 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
 
   // ===== 1C-2 필수문서(있으면 채움) =====
   if (data.docs) {
-    fillDocSheets(wb, data.docs);
+    fillDocSheets(wb, data.docs, data);
   }
 
   // ===== 1C-3 보충작업 별지(체크분만 헤더 채움 + 미체크 시트 제거) =====

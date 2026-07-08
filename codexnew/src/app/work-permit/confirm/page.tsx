@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { readDraft, clearDraft, type WpDraft } from '@/lib/work-permit-draft';
 import { SUPPLEMENTAL_WORKS } from '@/lib/work-permit-constants';
+import SignaturePad from '@/components/SignaturePad';
 
 function fmt(iso: string): string {
   if (!iso) return '-';
@@ -17,6 +18,61 @@ export default function WorkPermitConfirm() {
   const [draft, setDraft] = useState<WpDraft>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  // R-6: 신청인 서명 / 안전관리자 서명 / 현장 사진
+  const [applicantSig, setApplicantSig] = useState('');
+  const [safetyManagerSig, setSafetyManagerSig] = useState('');
+  const [photos, setPhotos] = useState<string[]>([]);
+
+  // 업로드 전 처리: 16:9 중앙 크롭(양식 사진칸 비율 고정) + 1280×720 리사이즈, ~200KB JPEG
+  const resizeToDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const W = 1280, H = 720; // 16:9 고정 → 별지 사진칸에 왜곡 없이 삽입
+        const srcRatio = img.width / img.height;
+        const dstRatio = W / H;
+        let sx = 0, sy = 0, sw = img.width, sh = img.height;
+        if (srcRatio > dstRatio) {
+          sw = Math.round(img.height * dstRatio);
+          sx = Math.round((img.width - sw) / 2);
+        } else {
+          sh = Math.round(img.width / dstRatio);
+          sy = Math.round((img.height - sh) / 2);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = W;
+        canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject(new Error('canvas'));
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
+        const TARGET = 200 * 1024;
+        let q = 0.8;
+        let out = canvas.toDataURL('image/jpeg', q);
+        while (out.length * 0.75 > TARGET && q > 0.4) {
+          q -= 0.1;
+          out = canvas.toDataURL('image/jpeg', q);
+        }
+        resolve(out);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image')); };
+      img.src = url;
+    });
+
+  const addPhotos = async (files: FileList | null) => {
+    if (!files) return;
+    const room = 2 - photos.length;
+    const picked = Array.from(files).filter((f) => f.type.startsWith('image/')).slice(0, room);
+    for (const f of picked) {
+      try {
+        const url = await resizeToDataUrl(f);
+        setPhotos((prev) => (prev.length >= 2 ? prev : [...prev, url]));
+      } catch (e) {
+        console.error('[photo resize]', e);
+      }
+    }
+  };
 
   useEffect(() => {
     const d = readDraft();
@@ -48,6 +104,14 @@ export default function WorkPermitConfirm() {
           participants: (draft.participants ?? []).map((p) => ({
             name: p.name, birthDate: p.birthDate, phone: p.phone,
           })),
+          // R-6: 승인자·TBM 상세(정보 단계) + 서명·사진(확인 단계)
+          approval: draft.approval ?? {},
+          tbmDetail: draft.tbmDetail ?? {},
+          signatures: {
+            applicant: applicantSig || undefined,
+            safetyManager: safetyManagerSig || undefined,
+          },
+          photos,
         }),
       });
       const json = await res.json();
@@ -90,6 +154,13 @@ export default function WorkPermitConfirm() {
         <Row label="작업기간" value={`${fmt(draft.info.workStart)} ~ ${fmt(draft.info.workEnd)}`} />
         <Row label="작업개요" value={draft.info.workContent} />
         <Row label="보충작업" value={checkedSupp.length > 0 ? checkedSupp.map((w) => w.label).join(', ') : '해당 없음'} />
+        {(draft.approval?.approverName || draft.approval?.approverTitle) && (
+          <Row
+            label="승인자"
+            value={`${draft.approval?.approverTitle ?? ''} ${draft.approval?.approverName ?? ''}`.trim() +
+              (draft.approval?.approvalMode ? ` (${draft.approval.approvalMode === 'SITE' ? '현장' : '원격'})` : '')}
+          />
+        )}
       </div>
 
       <div className="space-y-2">
@@ -100,6 +171,50 @@ export default function WorkPermitConfirm() {
             <p className="text-xs text-slate-600 mt-0.5">{p.companyName ?? ''} · 교육 유효 ~{p.expiresAt?.substring(0, 10)}</p>
           </div>
         ))}
+      </div>
+
+      <div className="card space-y-4">
+        <div>
+          <p className="text-sm font-bold text-slate-700">신청인 서명 (TBM 팀장 서명 겸용)</p>
+          <p className="text-xs text-slate-500 mt-0.5 mb-2">서명하면 허가서 신청인란과 TBM 팀장란에 자동 인쇄됩니다. (선택)</p>
+          <SignaturePad onChange={setApplicantSig} />
+        </div>
+        {draft.tbmDetail?.safetyManagerName && (
+          <div>
+            <p className="text-sm font-bold text-slate-700">안전관리자 서명 — {draft.tbmDetail.safetyManagerName} (선택)</p>
+            <div className="mt-2">
+              <SignaturePad onChange={setSafetyManagerSig} />
+            </div>
+          </div>
+        )}
+        <div>
+          <p className="text-sm font-bold text-slate-700">TBM 실시 사진 (선택, 최대 2장)</p>
+          <p className="text-xs text-slate-500 mt-0.5 mb-2">TBM 진행 장면 사진만 올려주세요. 별지 「1-2_TBM현장사진」에 자동 삽입됩니다.</p>
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={(e) => { addPhotos(e.target.files); e.target.value = ''; }}
+            className="text-sm"
+            disabled={photos.length >= 2}
+          />
+          {photos.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {photos.map((src, i) => (
+                <div key={i} className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={src} alt={`현장사진 ${i + 1}`} className="h-16 w-16 rounded-lg object-cover border border-slate-200" />
+                  <button
+                    type="button"
+                    onClick={() => setPhotos((prev) => prev.filter((_, idx) => idx !== i))}
+                    className="absolute -right-1 -top-1 h-5 w-5 rounded-full bg-red-500 text-xs text-white leading-5"
+                    aria-label="사진 삭제"
+                  >×</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}

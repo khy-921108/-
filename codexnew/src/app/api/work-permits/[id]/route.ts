@@ -15,7 +15,9 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       `id, permit_number, permit_type, status, request_company_id, request_company_name,
        work_name, work_location, work_start, work_end, work_content,
        applicant_name, applicant_phone, applicant_title, equipment_no,
-       tbm, supplemental, note, created_at`
+       tbm, supplemental, note, created_at,
+       applicant_signature, issuer_title, issuer_signature, approved_by, approved_at,
+       approver_name, approver_title, approver_signature, approval_mode, approver_signed_at, completion`
     )
     .eq('id', ctx.params.id)
     .maybeSingle();
@@ -84,6 +86,22 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       },
       supplemental: permit.supplemental ?? {},
       tbm: permit.tbm ?? {},
+      // R-6: 신청인 서명 / 발급자(안전환경) / 승인자(요청부서 현장책임자) / 작업완료
+      applicantSignature: permit.applicant_signature ?? null,
+      issuer: {
+        name: permit.approved_by ?? null,
+        title: permit.issuer_title ?? null,
+        signature: permit.issuer_signature ?? null,
+        at: permit.approved_at ?? null,
+      },
+      approval: {
+        name: permit.approver_name ?? null,
+        title: permit.approver_title ?? null,
+        signature: permit.approver_signature ?? null,
+        mode: permit.approval_mode ?? null,
+        at: permit.approver_signed_at ?? null,
+      },
+      completion: permit.completion ?? {},
       participants: (parts ?? []).map((p: any) => ({
         name: p.name,
         companyName: p.company_name,
