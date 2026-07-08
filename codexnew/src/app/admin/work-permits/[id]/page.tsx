@@ -1,13 +1,14 @@
 'use client';
 
 /**
- * 관리자 작업허가서 상세 (조회 전용) — R-6 게이트③-1
- * ⚠️ 순수 조회. 승인/서명/완료/부서확인 "버튼·저장"은 ③-2 이후. 여기선 상태만 표시.
- * 데이터 = 기존 공개 GET /api/work-permits/[id] 재사용(admin 레이아웃 requireAdmin 보호).
+ * 관리자 작업허가서 상세 — R-6 게이트③-2a
+ * ③-1(조회) + 1차 발급·2차 입회 서명 캡처. 단계별 개별 액션(일괄 금지), 1차→2차 순서 강제.
+ * ⚠️ 3차 별지 현장확인·공무 부서확인·작업완료 서명은 ③-2b(미구현). 여기선 상태만 표시.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import SignaturePad from '@/components/SignaturePad';
 import { SUPPLEMENTAL_WORKS } from '@/lib/work-permit-constants';
 
 function fmtDateTime(iso?: string | null): string {
@@ -26,25 +27,33 @@ function StatusBadge({ status }: { status: string }) {
     SUBMITTED: { l: '⏳ 대기', c: 'bg-slate-100 text-slate-600' },
   };
   const s = m[status] ?? m.SUBMITTED;
-  return <span className={`rounded-full text-xs font-bold px-2 py-0.5 ${s.c}`}>{s.l}</span>;
+  return <span className={`rounded-full text-xs font-bold px-2.5 py-1 ${s.c}`}>{s.l}</span>;
 }
 
-/** 서명 현황 한 줄: 서명 이미지 썸네일 + 서명자·시각 / 또는 미서명 뱃지 */
-function SigRow({ label, sub, signature, who, at, pending }: {
-  label: string; sub?: string; signature?: string | null; who?: string | null; at?: string | null; pending?: string;
+/** 3상태 셀: TBM 전(회색) / 미완료(주황) / 완료(✅) */
+function TriCell({ done, started }: { done: boolean; started: boolean }) {
+  if (done) return <span className="text-emerald-600 font-bold">✅</span>;
+  if (started) return <span className="rounded bg-amber-100 text-amber-700 text-[11px] font-bold px-1.5 py-0.5">미완료</span>;
+  return <span className="text-slate-300 text-[11px]">TBM 전</span>;
+}
+
+/** 서명 현황 한 줄 (+ 우측 액션 슬롯) */
+function SigRow({ label, sub, signature, who, at, pending, action }: {
+  label: string; sub?: string; signature?: string | null; who?: string | null; at?: string | null;
+  pending?: string; action?: React.ReactNode;
 }) {
   const signed = !!(signature && signature.startsWith('data:image/'));
   return (
     <div className="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0">
-      <div className="w-32 shrink-0">
+      <div className="w-28 shrink-0">
         <p className="text-sm font-semibold text-slate-700">{label}</p>
         {sub && <p className="text-[11px] text-slate-400">{sub}</p>}
       </div>
       {signed ? (
         <>
           <img src={signature!} alt="서명" className="h-9 border border-slate-200 rounded bg-white px-1" />
-          <div className="text-xs text-slate-600">
-            {who && <span className="font-medium">{who}</span>}
+          <div className="text-xs text-slate-600 min-w-0">
+            {who && <span className="font-medium break-all">{who}</span>}
             {at && <span className="text-slate-400"> · {fmtDateTime(at)}</span>}
           </div>
         </>
@@ -53,6 +62,7 @@ function SigRow({ label, sub, signature, who, at, pending }: {
           {pending ?? '미서명'}
         </span>
       )}
+      {action && <div className="ml-auto shrink-0">{action}</div>}
     </div>
   );
 }
@@ -63,20 +73,28 @@ export default function AdminWorkPermitDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(`/api/work-permits/${id}`);
-        const json = await res.json();
-        if (json.success) setData(json.data);
-        else setError(json.message || '조회 실패');
-      } catch {
-        setError('네트워크 오류');
-      } finally {
-        setLoading(false);
-      }
-    })();
+  // 서명 모달
+  const [modal, setModal] = useState<null | 'issue' | 'witness'>(null);
+  const [sig, setSig] = useState('');
+  const [title, setTitle] = useState('');
+  const [instructions, setInstructions] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [modalErr, setModalErr] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/work-permits/${id}`, { cache: 'no-store' });
+      const json = await res.json();
+      if (json.success) setData(json.data);
+      else setError(json.message || '조회 실패');
+    } catch {
+      setError('네트워크 오류');
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
+
+  useEffect(() => { load(); }, [load]);
 
   if (loading) return <div className="py-10 text-center text-slate-500">불러오는 중…</div>;
   if (error || !data) return <div className="card text-center text-red-600 py-8">{error || '데이터 없음'}</div>;
@@ -92,20 +110,85 @@ export default function AdminWorkPermitDetailPage() {
   const participants: any[] = data.participants ?? [];
   const photoCount = Array.isArray(tbm.photos) ? tbm.photos.length : 0;
 
+  // TBM 시작 판정: 사진 또는 안전지시사항 중 하나라도 있으면 시작됨
+  const tbmStarted = photoCount > 0 || !!(tbm.safetyInstructions && String(tbm.safetyInstructions).trim());
+
+  const issuerSigned = !!(data.issuer?.signature && String(data.issuer.signature).startsWith('data:image/'));
+  const witness = tbm.witness ?? null;
+  const witnessSigned = !!(witness?.signature && String(witness.signature).startsWith('data:image/'));
+
+  const openModal = (kind: 'issue' | 'witness') => {
+    setModalErr('');
+    setSig('');
+    setTitle('');
+    setInstructions(tbm.safetyInstructions ?? '');
+    setModal(kind);
+  };
+
+  const submitSig = async () => {
+    if (!sig) { setModalErr('서명을 입력해 주세요.'); return; }
+    if (modal === 'witness' && !instructions.trim()) { setModalErr('오늘의 안전지시사항을 입력해 주세요.'); return; }
+    setSaving(true);
+    setModalErr('');
+    try {
+      const bodyObj: any = { action: modal, signature: sig };
+      if (modal === 'issue') bodyObj.title = title.trim();
+      if (modal === 'witness') bodyObj.safetyInstructions = instructions.trim();
+      const res = await fetch(`/api/admin/work-permits/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bodyObj),
+      });
+      const json = await res.json();
+      if (!json.success) { setModalErr(json.message || '저장 실패'); setSaving(false); return; }
+      setModal(null);
+      await load();
+    } catch {
+      setModalErr('네트워크 오류');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const IssueBtn = (
+    <button
+      onClick={() => { if (issuerSigned && !confirm('이미 발급 서명이 있습니다. 다시 서명하면 덮어씁니다. 계속할까요?')) return; openModal('issue'); }}
+      className="btn-primary text-xs px-3 py-1.5"
+    >
+      {issuerSigned ? '재서명' : '1차 승인'}
+    </button>
+  );
+  const WitnessBtn = (
+    <button
+      onClick={() => {
+        if (!issuerSigned) return;
+        if (witnessSigned && !confirm('이미 입회 서명이 있습니다. 다시 서명하면 덮어씁니다. 계속할까요?')) return;
+        openModal('witness');
+      }}
+      disabled={!issuerSigned}
+      title={!issuerSigned ? '1차 승인(발급)을 먼저 완료하세요' : undefined}
+      className={`text-xs px-3 py-1.5 rounded-lg font-bold ${issuerSigned ? 'btn-primary' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+    >
+      {witnessSigned ? '재서명' : '2차 승인'}
+    </button>
+  );
+
   return (
     <main className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <a href="/admin/work-permits" className="text-xs text-slate-500 hover:underline">← 작업허가 목록</a>
-          <h1 className="text-xl font-bold text-slate-800 mt-1 flex items-center gap-2">
-            <span className="font-mono text-brand">{data.permitNumber}</span>
+      {/* 헤더 — 허가번호 크게 */}
+      <div className="card">
+        <a href="/admin/work-permits" className="text-xs text-slate-500 hover:underline">← 작업허가 목록</a>
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-1">
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-2xl sm:text-3xl font-extrabold tracking-tight text-brand whitespace-nowrap">{data.permitNumber}</span>
             <StatusBadge status={data.status} />
-          </h1>
+          </div>
+          <div className="flex gap-2">
+            <a href={`/work-permit/print/${id}`} target="_blank" rel="noreferrer" className="btn-secondary text-sm">🖨 인쇄</a>
+            <a href={`/api/work-permits/${id}/xlsx`} className="btn-secondary text-sm">📥 회사양식 xlsx</a>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <a href={`/work-permit/print/${id}`} target="_blank" rel="noreferrer" className="btn-secondary text-sm">🖨 인쇄</a>
-          <a href={`/api/work-permits/${id}/xlsx`} className="btn-secondary text-sm">📥 회사양식 xlsx</a>
-        </div>
+        <p className="text-sm text-slate-600 mt-2">{info.workName} · {data.companyName}</p>
       </div>
 
       {/* 기본정보 */}
@@ -135,9 +218,14 @@ export default function AdminWorkPermitDetailPage() {
         )}
       </section>
 
-      {/* 참여자 명단 + TBM 확인 / 서약 서명 */}
+      {/* 참여자 명단 + TBM 확인 / 서약 서명 (3상태) */}
       <section className="card text-sm">
-        <h2 className="font-bold text-slate-700 mb-2">참여자 ({participants.length})</h2>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="font-bold text-slate-700">참여자 ({participants.length})</h2>
+          <span className={`text-[11px] rounded-full px-2 py-0.5 ${tbmStarted ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+            {tbmStarted ? 'TBM 진행/완료' : 'TBM 시작 전'}
+          </span>
+        </div>
         <table className="w-full text-xs">
           <thead>
             <tr className="text-slate-400 border-b border-slate-100">
@@ -156,8 +244,8 @@ export default function AdminWorkPermitDetailPage() {
                 <tr key={i} className="border-b border-slate-50">
                   <td className="py-1.5 font-medium text-slate-800">{p.name}</td>
                   <td className="text-slate-500">{p.companyName}</td>
-                  <td className="text-center">{tbmOk ? '✅' : '—'}</td>
-                  <td className="text-center">{plOk ? '✅' : '—'}</td>
+                  <td className="text-center"><TriCell done={tbmOk} started={tbmStarted} /></td>
+                  <td className="text-center"><TriCell done={plOk} started={tbmStarted} /></td>
                 </tr>
               );
             })}
@@ -172,22 +260,66 @@ export default function AdminWorkPermitDetailPage() {
         <Row k="안전대책" v={(tbm.safetyMeasures ?? []).join(', ')} />
         <Row k="안전관리자" v={tbm.safetyManager?.name} />
         <Row k="현장사진" v={photoCount > 0 ? `${photoCount}장 첨부` : '없음'} />
+        <Row k="안전지시사항" v={tbm.safetyInstructions} />
         <Row k="참석 확인" v={`${confs.filter((c) => c.signature).length} / ${participants.length}명`} />
       </section>
 
-      {/* 서명 현황 (핵심) */}
+      {/* 서명 현황 + 액션 (핵심) */}
       <section className="card">
-        <h2 className="font-bold text-slate-700 mb-1">서명 현황</h2>
-        <p className="text-[11px] text-slate-400 mb-2">※ 발급·승인·완료·부서확인 서명 입력은 다음 단계(③-2)에서 추가됩니다. 현재는 상태만 표시.</p>
+        <h2 className="font-bold text-slate-700 mb-1">서명 현황 / 승인</h2>
+        <p className="text-[11px] text-slate-400 mb-2">발급(1차) → 입회(2차) 순서. 요청부서 승인·별지 현장확인·작업완료 서명은 ③-2b에서 추가됩니다.</p>
         <SigRow label="신청인" sub="TBM 팀장 겸용" signature={data.applicantSignature} who={info.applicantName} at={data.createdAt} />
         <SigRow label="안전관리자" sub="TBM 확인" signature={tbm.safetyManager?.signature} who={tbm.safetyManager?.name} />
-        <SigRow label="발급 (안전환경)" signature={data.issuer?.signature} who={data.issuer?.name} at={data.issuer?.at} />
-        <SigRow label="승인 (요청부서)" sub="현장책임자" signature={data.approval?.signature} who={data.approval?.name} at={data.approval?.at} />
-        <SigRow label="작업완료" sub="작업자 서명" signature={data.completion?.workerSignature} who={info.applicantName} at={data.completion?.completedAt} />
+        <SigRow label="발급 (1차)" sub="안전환경" signature={data.issuer?.signature} who={data.issuer?.name} at={data.issuer?.at} action={IssueBtn} />
+        <SigRow label="입회 (2차)" sub="안전환경 현장입회" signature={witness?.signature} who={witness?.by} at={witness?.at} action={WitnessBtn} />
+        <SigRow label="승인 (요청부서)" sub="현장책임자" signature={data.approval?.signature} who={data.approval?.name} at={data.approval?.at} pending="③-2b 예정" />
+        <SigRow label="작업완료" sub="작업자 서명" signature={data.completion?.workerSignature} who={info.applicantName} at={data.completion?.completedAt} pending="③-2b 예정" />
         {checkedSupp.length > 0 && (
-          <SigRow label="별지 부서확인" sub={`${checkedSupp.map((w) => w.label).join('·')}`} signature={null} pending="③-2 예정" />
+          <SigRow label="별지 현장확인" sub={checkedSupp.map((w) => w.label).join('·')} signature={null} pending="③-2b 예정" />
         )}
       </section>
+
+      {/* 서명 모달 */}
+      {modal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !saving && setModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-bold text-slate-800">
+              {modal === 'issue' ? '1차 승인 — 발급자 서명 (안전환경)' : '2차 승인 — 입회자 서명 (안전환경)'}
+            </h3>
+
+            {modal === 'issue' && (
+              <div>
+                <label className="label">직책 (선택)</label>
+                <input className="input-base" placeholder="예: 안전환경담당" value={title} onChange={(e) => setTitle(e.target.value)} />
+              </div>
+            )}
+
+            {modal === 'witness' && (
+              <div>
+                <label className="label">오늘의 안전지시사항 <span className="text-red-500">*</span></label>
+                <textarea
+                  className="input-base min-h-[72px]"
+                  placeholder="현장 TBM 후 오늘 작업에 대한 안전지시사항을 입력하세요."
+                  value={instructions}
+                  onChange={(e) => setInstructions(e.target.value)}
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="label">서명</label>
+              <SignaturePad onChange={setSig} />
+            </div>
+
+            {modalErr && <p className="text-sm text-red-600">{modalErr}</p>}
+
+            <div className="flex gap-2 justify-end pt-1">
+              <button className="btn-secondary" onClick={() => setModal(null)} disabled={saving}>취소</button>
+              <button className="btn-primary" onClick={submitSig} disabled={saving}>{saving ? '저장 중…' : '서명 저장'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

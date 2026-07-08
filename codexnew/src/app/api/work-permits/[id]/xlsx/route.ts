@@ -138,6 +138,11 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       at: permit.approver_signed_at ?? null,
     },
     completion: (permit.completion ?? {}) as PermitDocData['completion'],
+    // R-6 ③-2a: 입회자(2차)·안전지시사항 = tbm JSONB
+    witness: tbm.witness
+      ? { name: tbm.witness.by ?? null, signature: tbm.witness.signature ?? null, at: tbm.witness.at ?? null }
+      : null,
+    safetyInstructions: typeof tbm.safetyInstructions === 'string' ? tbm.safetyInstructions : null,
     tbmExtra: {
       workContent: tbm.workContent ?? null,
       riskFactors: Array.isArray(tbm.riskFactors) ? tbm.riskFactors : [],

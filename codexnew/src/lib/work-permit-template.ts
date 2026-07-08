@@ -107,6 +107,10 @@ export interface PermitDocData {
   issuer?: { name: string | null; title: string | null; signature: string | null; at: string | null } | null;
   /** 승인자 = 요청·주관부서 현장 책임자(직책/성명은 신청 시, 서명은 gate ③) */
   approval?: { name: string | null; title: string | null; signature: string | null; mode: string | null; at: string | null } | null;
+  /** 입회자 = 안전환경 현장입회(2차, gate ③-2a) — 없으면 공란 */
+  witness?: { name: string | null; signature: string | null; at: string | null } | null;
+  /** 오늘의 안전지시사항(2차 입회 시 입력, gate ③-2a) — 없으면 공란 */
+  safetyInstructions?: string | null;
   /** 작업완료 확인(종료란) — gate ③, 없으면 공란 */
   completion?: { completedAt?: string; workerSignature?: string; restoreState?: string; witnessName?: string } | null;
   /** TBM 디지털 상세 + 참여자 확인 스탬프 */
@@ -543,7 +547,16 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
     setCell(gs, 'A38', `발급자(안전환경담당)   성명: ${data.issuer.name}`);
     placeImage(wb, gs, data.issuer.signature, 'D38', 76, 18, 0.05, 0.1);
   }
-  // A39 입회자 / A40 관련부서 협조자 = '(해당 시)' — 데이터 없음, 서명칸 공란 유지
+  // A39 입회자(안전환경 현장입회, 2차) — 서명칸 D39, gate ③-2a
+  if (data.witness?.signature || data.witness?.name) {
+    setCell(gs, 'A39', `입회자(안전환경담당)   성명: ${data.witness?.name ?? ''}`);
+    placeImage(wb, gs, data.witness?.signature, 'D39', 76, 18, 0.05, 0.1);
+  }
+  // 오늘의 안전지시사항(입회 2차 입력) → 기타 특별사항(A35)
+  if (data.safetyInstructions) {
+    setCell(gs, G.etc, `오늘의 안전지시사항: ${data.safetyInstructions}`, true);
+  }
+  // A40 관련부서 협조자 = '(해당 시)' — 데이터 없음, 서명칸 공란 유지
   // E37 완료시간+작업자(서명칸 I37) / E38 확인자+복원상태(서명칸 I38) — gate ③
   const comp = data.completion;
   if (comp && (comp.completedAt || comp.workerSignature || comp.restoreState)) {
