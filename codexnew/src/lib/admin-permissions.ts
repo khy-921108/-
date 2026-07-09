@@ -20,6 +20,8 @@ export const ADMIN_PERMISSIONS: PermissionDef[] = [
   { key: 'EXCEL_EXPORT', label: '엑셀 다운로드', group: 'default' },
   // 선택 부여(생성 시 OFF)
   { key: 'WORKPERMITS_APPROVE', label: '작업허가 승인·서명(발급/입회)', group: 'optional' },
+  // 공무팀 역할용 — 관련부서(공무) 별지 현장확인 서명. 공무 계정 발부 시 이 키만 부여(승인키는 미부여).
+  { key: 'WORKPERMITS_DEPT_CONFIRM', label: '작업허가 관련부서 현장확인(공무)', group: 'optional' },
   { key: 'COMPANIES_EDIT', label: '업체 추가·수정·인원·문서', group: 'optional' },
   { key: 'COMPANIES_MANAGE', label: '업체 상태·삭제·병합', group: 'optional' },
   { key: 'SESSION_DELETE', label: '수료(세션) 삭제', group: 'optional' },

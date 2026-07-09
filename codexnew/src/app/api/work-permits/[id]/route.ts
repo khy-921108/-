@@ -17,7 +17,8 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
        applicant_name, applicant_phone, applicant_title, equipment_no,
        tbm, supplemental, note, created_at,
        applicant_signature, issuer_title, issuer_signature, approved_by, approved_at,
-       approver_name, approver_title, approver_signature, approval_mode, approver_signed_at, completion`
+       approver_name, approver_title, approver_signature, approval_mode, approver_signed_at,
+       completion, dept_confirmations, started_by, started_at`
     )
     .eq('id', ctx.params.id)
     .maybeSingle();
@@ -102,6 +103,9 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
         at: permit.approver_signed_at ?? null,
       },
       completion: permit.completion ?? {},
+      deptConfirmations: permit.dept_confirmations ?? {},
+      startedBy: permit.started_by ?? null,
+      startedAt: permit.started_at ?? null,
       participants: (parts ?? []).map((p: any) => ({
         name: p.name,
         companyName: p.company_name,

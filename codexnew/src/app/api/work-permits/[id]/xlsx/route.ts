@@ -20,7 +20,8 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
        work_start, work_end, work_content, applicant_name, applicant_title, applicant_phone,
        equipment_no, supplemental, note, created_at, tbm,
        applicant_signature, issuer_title, issuer_signature, approved_by, approved_at,
-       approver_name, approver_title, approver_signature, approval_mode, approver_signed_at, completion`
+       approver_name, approver_title, approver_signature, approval_mode, approver_signed_at,
+       completion, dept_confirmations`
     )
     .eq('id', ctx.params.id)
     .maybeSingle();
@@ -143,6 +144,8 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       ? { name: tbm.witness.by ?? null, signature: tbm.witness.signature ?? null, at: tbm.witness.at ?? null }
       : null,
     safetyInstructions: typeof tbm.safetyInstructions === 'string' ? tbm.safetyInstructions : null,
+    // R-6 ③-2b: 3차 별지 현장확인
+    deptConfirmations: (permit.dept_confirmations ?? {}) as PermitDocData['deptConfirmations'],
     tbmExtra: {
       workContent: tbm.workContent ?? null,
       riskFactors: Array.isArray(tbm.riskFactors) ? tbm.riskFactors : [],

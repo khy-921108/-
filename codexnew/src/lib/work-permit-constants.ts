@@ -44,6 +44,26 @@ export const SUPPLEMENTAL_WORKS: SupplementalWork[] = [
 
 export const SUPPLEMENTAL_KEYS: SupplementalKey[] = SUPPLEMENTAL_WORKS.map((s) => s.key);
 
+/**
+ * R-6 게이트③-2b: 별지별 3차 현장확인 "담당 확인부서" 매트릭스(조율 세션 확정).
+ *  · 화기·정전(전기) = 공무팀  · 밀폐·고소·굴착·중장비·방사선 = 안전환경
+ * 공무 담당 별지는 공무 확인(또는 SUPER 긴급대리) 없이는 작업개시 차단 대상.
+ */
+export type ConfirmDept = '공무' | '안전환경';
+export const SUPPLEMENTAL_CONFIRM_DEPT: Record<SupplementalKey, ConfirmDept> = {
+  hot: '공무',
+  electric: '공무',
+  confined: '안전환경',
+  height: '안전환경',
+  excavation: '안전환경',
+  heavy: '안전환경',
+  radiation: '안전환경',
+};
+/** 공무 확인이 반드시 필요한(=차단 대상) 별지 키 */
+export function isMaintenanceDept(key: SupplementalKey): boolean {
+  return SUPPLEMENTAL_CONFIRM_DEPT[key] === '공무';
+}
+
 export function supplementalLabel(key: string): string {
   return SUPPLEMENTAL_WORKS.find((s) => s.key === key)?.label ?? key;
 }

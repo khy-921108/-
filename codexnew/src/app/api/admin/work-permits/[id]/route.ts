@@ -1,24 +1,38 @@
 import { NextResponse } from 'next/server';
-import { requirePermission } from '@/lib/supabase/auth';
+import { requireAdmin } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
+import {
+  SUPPLEMENTAL_CONFIRM_DEPT,
+  isSupplementalKey,
+  supplementalLabel,
+  type SupplementalKey,
+} from '@/lib/work-permit-constants';
 
 export const fetchCache = 'force-no-store';
 
 /**
- * PATCH /api/admin/work-permits/:id  — R-6 게이트③-2a 승인 서명 저장
- * 권한: WORKPERMITS_APPROVE (SUPER 통과). 처리자(actor)=로그인 관리자 이메일(서버가 채움).
+ * PATCH /api/admin/work-permits/:id  — R-6 게이트③ 승인/서명/확인/종료
+ * 처리자(actor)=로그인 관리자 이메일(서버가 채움). 단계별 개별 액션(일괄 금지).
  *
- * body.action:
- *  - 'issue'   : 1차 승인(발급자·안전환경) → issuer_signature/issuer_title/approved_by/approved_at
- *  - 'witness' : 2차 승인(입회자·안전환경) → tbm.witness + tbm.safetyInstructions
- *                (1차 완료 후에만 허용 — 순서 강제)
+ * action:
+ *  ③-2a) 'issue'   1차 발급(안전환경)  · 'witness' 2차 입회(안전환경, 1차 후)
+ *  ③-2b) 'dept_confirm'   3차 별지 현장확인(담당부서 개별 서명)
+ *        'dept_proxy'     공무 별지 SUPER 긴급대리(사유 필수, EMERGENCY_PROXY)
+ *        'complete_report' 종료신고(작업자/소장; 안전환경 대리입력)
+ *        'complete_confirm' 종료확인(안전환경 최종) → status COMPLETED
+ *        'start_work'      작업개시 최종승인(공무 미확인 화기·전기 별지 있으면 차단) → status APPROVED
  *
- * ⚠️ 3차 별지 현장확인·공무 부서확인은 ③-2b(미구현). 여기서 status 는 변경하지 않음.
+ * 권한: 안전환경 계열=WORKPERMITS_APPROVE(SUPER 통과). 공무 별지 정상확인=WORKPERMITS_DEPT_CONFIRM(명시부여).
+ *       긴급대리=SUPER 전용.
  */
 export async function PATCH(req: Request, ctx: { params: { id: string } }) {
-  const auth = await requirePermission('WORKPERMITS_APPROVE');
+  const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
   const actor = auth.admin.email;
+  const isSuper = auth.admin.role === 'SUPER';
+  const perms = auth.admin.permissions ?? [];
+  const hasApprove = isSuper || perms.includes('WORKPERMITS_APPROVE');
+  const hasDeptConfirm = perms.includes('WORKPERMITS_DEPT_CONFIRM'); // 명시 부여만(SUPER all-pass 제외)
 
   let body: any;
   try {
@@ -26,17 +40,17 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   } catch {
     return NextResponse.json({ success: false, code: 'BAD_REQUEST', message: '잘못된 요청입니다.' }, { status: 400 });
   }
-
   const action = body?.action;
   const signature = typeof body?.signature === 'string' ? body.signature : '';
-  if (!signature.startsWith('data:image/')) {
+  const needSig = action !== 'start_work';
+  if (needSig && !signature.startsWith('data:image/')) {
     return NextResponse.json({ success: false, code: 'NO_SIGNATURE', message: '서명이 필요합니다.' }, { status: 400 });
   }
 
   const supabase = createServiceClient();
   const { data: permit, error: readErr } = await supabase
     .from('work_permits')
-    .select('id, issuer_signature, tbm')
+    .select('id, status, supplemental, issuer_signature, tbm, dept_confirmations, completion')
     .eq('id', ctx.params.id)
     .maybeSingle();
 
@@ -49,52 +63,120 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   }
 
   const now = new Date().toISOString();
+  const forbidden = () =>
+    NextResponse.json({ success: false, code: 'FORBIDDEN', message: '이 작업에 대한 권한이 없습니다.' }, { status: 403 });
+  const fail = (code: string, message: string, status = 400) =>
+    NextResponse.json({ success: false, code, message }, { status });
 
+  // ===== ③-2a =====
   if (action === 'issue') {
-    // 1차 발급(안전환경). 재서명 시 덮어쓰기(클라에서 확인).
+    if (!hasApprove) return forbidden();
     const title = typeof body?.title === 'string' && body.title.trim() ? body.title.trim() : null;
     const { error } = await supabase
       .from('work_permits')
-      .update({
-        issuer_signature: signature,
-        issuer_title: title,
-        approved_by: actor,
-        approved_at: now,
-      })
+      .update({ issuer_signature: signature, issuer_title: title, approved_by: actor, approved_at: now })
       .eq('id', ctx.params.id);
-    if (error) {
-      console.error('[admin/work-permits PATCH] issue:', error);
-      return NextResponse.json({ success: false, code: 'UPDATE_FAILED', message: '저장 실패' }, { status: 500 });
-    }
+    if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
     return NextResponse.json({ success: true, data: { action, by: actor, at: now } });
   }
 
   if (action === 'witness') {
-    // 순서 강제: 1차 발급 없이는 2차 입회 불가
-    if (!permit.issuer_signature) {
-      return NextResponse.json(
-        { success: false, code: 'ORDER_VIOLATION', message: '1차 승인(발급)을 먼저 완료해야 합니다.' },
-        { status: 409 }
-      );
-    }
+    if (!hasApprove) return forbidden();
+    if (!permit.issuer_signature) return fail('ORDER_VIOLATION', '1차 승인(발급)을 먼저 완료해야 합니다.', 409);
     const instructions = typeof body?.safetyInstructions === 'string' ? body.safetyInstructions.trim() : '';
-    if (!instructions) {
-      return NextResponse.json(
-        { success: false, code: 'NO_INSTRUCTIONS', message: '오늘의 안전지시사항을 입력해 주세요.' },
-        { status: 400 }
-      );
-    }
+    if (!instructions) return fail('NO_INSTRUCTIONS', '오늘의 안전지시사항을 입력해 주세요.');
     const tbm = (permit.tbm ?? {}) as Record<string, any>;
     tbm.safetyInstructions = instructions;
     tbm.witness = { signature, at: now, by: actor };
-
     const { error } = await supabase.from('work_permits').update({ tbm }).eq('id', ctx.params.id);
-    if (error) {
-      console.error('[admin/work-permits PATCH] witness:', error);
-      return NextResponse.json({ success: false, code: 'UPDATE_FAILED', message: '저장 실패' }, { status: 500 });
-    }
+    if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
     return NextResponse.json({ success: true, data: { action, by: actor, at: now } });
   }
 
-  return NextResponse.json({ success: false, code: 'BAD_ACTION', message: '알 수 없는 동작입니다.' }, { status: 400 });
+  // ===== ③-2b : 3차 별지 현장확인 =====
+  if (action === 'dept_confirm' || action === 'dept_proxy') {
+    const supKey = body?.supKey;
+    if (!isSupplementalKey(supKey)) return fail('BAD_SUPKEY', '별지 종류가 올바르지 않습니다.');
+    const supp = (permit.supplemental ?? {}) as Record<string, string>;
+    if (supp[supKey] !== 'Y') return fail('SUP_NOT_ATTACHED', '해당 별지가 이 허가서에 포함되어 있지 않습니다.');
+    const dept = SUPPLEMENTAL_CONFIRM_DEPT[supKey as SupplementalKey];
+    const confs = (permit.dept_confirmations ?? {}) as Record<string, any>;
+
+    if (action === 'dept_proxy') {
+      // 공무 별지 한정, SUPER 전용, 사유 필수
+      if (dept !== '공무') return fail('PROXY_NOT_ALLOWED', '긴급 대리확인은 공무 담당 별지(화기·정전)만 가능합니다.');
+      if (!isSuper) return forbidden();
+      const reason = typeof body?.reason === 'string' ? body.reason.trim() : '';
+      if (!reason) return fail('NO_REASON', '긴급 대리확인 사유를 입력해 주세요.');
+      confs[supKey] = { dept: '공무', by: actor, name: null, signature, at: now, mode: 'EMERGENCY_PROXY', reason };
+    } else {
+      // 정상 확인: 안전환경 별지=WORKPERMITS_APPROVE / 공무 별지=WORKPERMITS_DEPT_CONFIRM(명시)
+      const allowed = dept === '안전환경' ? hasApprove : hasDeptConfirm;
+      if (!allowed) return forbidden();
+      const name = typeof body?.name === 'string' && body.name.trim() ? body.name.trim() : null;
+      confs[supKey] = { dept, by: actor, name, signature, at: now, mode: 'NORMAL', reason: null };
+    }
+    const { error } = await supabase.from('work_permits').update({ dept_confirmations: confs }).eq('id', ctx.params.id);
+    if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
+    return NextResponse.json({ success: true, data: { action, supKey, dept, by: actor, at: now } });
+  }
+
+  // ===== ③-2b : 종료 2단계 =====
+  if (action === 'complete_report') {
+    if (!hasApprove) return forbidden();
+    const comp = (permit.completion ?? {}) as Record<string, any>;
+    const completedAt = typeof body?.completedAt === 'string' && body.completedAt ? body.completedAt : now;
+    comp.completedAt = completedAt;
+    comp.workerSignature = signature;
+    comp.restoreState = typeof body?.restoreState === 'string' ? body.restoreState.trim() : (comp.restoreState ?? '');
+    comp.reportBy = actor;
+    comp.reportAt = now;
+    const { error } = await supabase.from('work_permits').update({ completion: comp }).eq('id', ctx.params.id);
+    if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
+    return NextResponse.json({ success: true, data: { action, by: actor, at: now } });
+  }
+
+  if (action === 'complete_confirm') {
+    if (!hasApprove) return forbidden();
+    const comp = (permit.completion ?? {}) as Record<string, any>;
+    if (!comp.workerSignature) return fail('ORDER_VIOLATION', '종료신고를 먼저 완료해야 합니다.', 409);
+    comp.confirmSignature = signature;
+    comp.confirmBy = actor;
+    comp.confirmAt = now;
+    const { error } = await supabase
+      .from('work_permits')
+      .update({ completion: comp, status: 'COMPLETED' })
+      .eq('id', ctx.params.id);
+    if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
+    return NextResponse.json({ success: true, data: { action, by: actor, at: now, status: 'COMPLETED' } });
+  }
+
+  // ===== ③-2b : 작업개시 최종승인(게이트) =====
+  if (action === 'start_work') {
+    if (!hasApprove) return forbidden();
+    const tbm = (permit.tbm ?? {}) as Record<string, any>;
+    const confs = (permit.dept_confirmations ?? {}) as Record<string, any>;
+    const supp = (permit.supplemental ?? {}) as Record<string, string>;
+    const missing: string[] = [];
+    if (!permit.issuer_signature) missing.push('1차 발급 서명');
+    if (!tbm.witness?.signature) missing.push('2차 입회 서명');
+    for (const key of Object.keys(SUPPLEMENTAL_CONFIRM_DEPT) as SupplementalKey[]) {
+      if (supp[key] !== 'Y') continue;
+      if (!confs[key]?.signature) {
+        const dept = SUPPLEMENTAL_CONFIRM_DEPT[key];
+        missing.push(`${supplementalLabel(key)} 별지 ${dept} 현장확인`);
+      }
+    }
+    if (missing.length > 0) {
+      return fail('GATE_BLOCKED', `작업개시 차단 — 미완료: ${missing.join(', ')}`, 409);
+    }
+    const { error } = await supabase
+      .from('work_permits')
+      .update({ status: 'APPROVED', started_by: actor, started_at: now })
+      .eq('id', ctx.params.id);
+    if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
+    return NextResponse.json({ success: true, data: { action, by: actor, at: now, status: 'APPROVED' } });
+  }
+
+  return fail('BAD_ACTION', '알 수 없는 동작입니다.');
 }

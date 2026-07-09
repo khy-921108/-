@@ -31,12 +31,19 @@ export interface WorkTypeDoneCells {
   workerSig: string; // 작업자 서명칸 anchor (I열)
 }
 
+/** R-6 ③-2b: 3차 현장확인 서명 위치 = 별지 "관련부서(해당 시)" 행 (A열 텍스트 / D열 서명) */
+export interface WorkTypeConfirmCells {
+  label: string; // 관련부서 텍스트 anchor (A열)
+  sig: string;   // 관련부서 서명칸 anchor (D열)
+}
+
 export interface WorkTypeDef {
   key: SupplementalKey;
   label: string;   // 보충작업 라벨(시트 식별/표시용) — SUPPLEMENTAL_WORKS 와 동일
   sheet: string;   // 템플릿 시트명(정확히 일치)
   cells: WorkTypeHeaderCells;
-  done: WorkTypeDoneCells; // R-6: 작업완료 자동채움(완료시간·작업자·서명). 확인자(부서)는 미연동.
+  done: WorkTypeDoneCells; // R-6: 작업완료 자동채움(완료시간·작업자·서명).
+  confirm: WorkTypeConfirmCells; // R-6 ③-2b: 3차 현장확인(관련부서 행)
 }
 
 /** 표준 레이아웃(★주의문 2행 존재) — 6개 시트 공통 */
@@ -60,13 +67,13 @@ const SHIFTED: WorkTypeHeaderCells = {
 };
 
 export const WORK_TYPES: WorkTypeDef[] = [
-  { key: 'hot',        label: '화기',     sheet: '3_화기작업허가서',     cells: STD,     done: { info: 'E31', workerSig: 'I31' } },
-  { key: 'confined',   label: '밀폐공간', sheet: '4_밀폐공간출입허가서', cells: STD,     done: { info: 'E29', workerSig: 'I29' } },
-  { key: 'electric',   label: '정전',     sheet: '5_정전작업허가서',     cells: SHIFTED, done: { info: 'E23', workerSig: 'I23' } },
-  { key: 'height',     label: '고소',     sheet: '6_고소작업허가서',     cells: STD,     done: { info: 'E24', workerSig: 'I24' } },
-  { key: 'excavation', label: '굴착',     sheet: '7a_굴착작업허가서',    cells: STD,     done: { info: 'E22', workerSig: 'I22' } },
-  { key: 'heavy',      label: '중장비',   sheet: '7b_중장비작업허가서',  cells: STD,     done: { info: 'E23', workerSig: 'I23' } },
-  { key: 'radiation',  label: '방사선',   sheet: '7c_방사선작업허가서',  cells: STD,     done: { info: 'E21', workerSig: 'I21' } },
+  { key: 'hot',        label: '화기',     sheet: '3_화기작업허가서',     cells: STD,     done: { info: 'E31', workerSig: 'I31' }, confirm: { label: 'A33', sig: 'D33' } },
+  { key: 'confined',   label: '밀폐공간', sheet: '4_밀폐공간출입허가서', cells: STD,     done: { info: 'E29', workerSig: 'I29' }, confirm: { label: 'A31', sig: 'D31' } },
+  { key: 'electric',   label: '정전',     sheet: '5_정전작업허가서',     cells: SHIFTED, done: { info: 'E23', workerSig: 'I23' }, confirm: { label: 'A25', sig: 'D25' } },
+  { key: 'height',     label: '고소',     sheet: '6_고소작업허가서',     cells: STD,     done: { info: 'E24', workerSig: 'I24' }, confirm: { label: 'A26', sig: 'D26' } },
+  { key: 'excavation', label: '굴착',     sheet: '7a_굴착작업허가서',    cells: STD,     done: { info: 'E22', workerSig: 'I22' }, confirm: { label: 'A24', sig: 'D24' } },
+  { key: 'heavy',      label: '중장비',   sheet: '7b_중장비작업허가서',  cells: STD,     done: { info: 'E23', workerSig: 'I23' }, confirm: { label: 'A25', sig: 'D25' } },
+  { key: 'radiation',  label: '방사선',   sheet: '7c_방사선작업허가서',  cells: STD,     done: { info: 'E21', workerSig: 'I21' }, confirm: { label: 'A23', sig: 'D23' } },
 ];
 
 /** 보충작업(Y) 체크된 종류만 필터 — 출력 순서는 WORK_TYPES 정의순 */

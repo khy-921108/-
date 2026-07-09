@@ -111,8 +111,16 @@ export interface PermitDocData {
   witness?: { name: string | null; signature: string | null; at: string | null } | null;
   /** 오늘의 안전지시사항(2차 입회 시 입력, gate ③-2a) — 없으면 공란 */
   safetyInstructions?: string | null;
-  /** 작업완료 확인(종료란) — gate ③, 없으면 공란 */
-  completion?: { completedAt?: string; workerSignature?: string; restoreState?: string; witnessName?: string } | null;
+  /** 작업완료 확인(종료란) — gate ③, 없으면 공란. 종료 2단계(신고→확인, ③-2b) 필드 포함 */
+  completion?: {
+    completedAt?: string; workerSignature?: string; restoreState?: string; witnessName?: string;
+    reportBy?: string; reportAt?: string;
+    confirmSignature?: string; confirmBy?: string; confirmAt?: string;
+  } | null;
+  /** 3차 별지 현장확인(③-2b): 별지코드 → 확인 스냅샷 */
+  deptConfirmations?: Record<string, {
+    dept?: string; by?: string; name?: string | null; signature?: string; at?: string; mode?: string; reason?: string | null;
+  }> | null;
   /** TBM 디지털 상세 + 참여자 확인 스탬프 */
   tbmExtra?: {
     workContent?: string | null;
@@ -461,7 +469,16 @@ function fillSupplementalHeader(
     }
     placeImage(wb, ws, comp.workerSignature ?? data.applicantSignature, t.done.workerSig, 72, 18, 0.05, 0.1);
   }
-  // ※ 관련 작업허가 체크·안전조치·가스측정·확인자(부서) 서명란은 손대지 않음(부서확인 슬라이스).
+  // R-6 ③-2b: 3차 현장확인 → 별지 "관련부서(해당 시)" 행. 긴급대리는 공무 서명인 척 금지(명시 라벨).
+  const dc = data.deptConfirmations?.[t.key];
+  if (dc?.signature) {
+    const label =
+      dc.mode === 'EMERGENCY_PROXY'
+        ? `관련부서(공무 미배정) · 안전환경 긴급대리${dc.reason ? ` (사유: ${dc.reason})` : ''}`
+        : `관련부서(${dc.dept ?? ''})   ${dc.name ?? ''}`.trimEnd();
+    setCell(ws, t.confirm.label, label, true);
+    placeImage(wb, ws, dc.signature, t.confirm.sig, 76, 18, 0.05, 0.1);
+  }
 }
 
 /**
@@ -565,10 +582,10 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
       setCell(gs, 'E37', `완료시간: ${fmtDateTime(comp.completedAt)}    작업자: ${data.info.applicantName}`);
     }
     placeImage(wb, gs, comp.workerSignature, 'I37', 72, 18, 0.05, 0.1);
-    if (comp.restoreState || data.approval?.name) {
-      setCell(gs, 'E38', `확인자(현장책임자): ${data.approval?.name ?? ''}`);
-      // 확인자 = 승인자와 동일인 → 승인자 서명 재사용
-      placeImage(wb, gs, data.approval?.signature, 'I38', 72, 18, 0.05, 0.1);
+    // E38 확인자 = 종료확인(안전환경 최종, ③-2b). 없으면 공란.
+    if (comp.confirmSignature) {
+      setCell(gs, 'E38', `확인자(안전환경): ${comp.confirmBy ?? ''}`);
+      placeImage(wb, gs, comp.confirmSignature, 'I38', 72, 18, 0.05, 0.1);
     }
     // 복원상태·입회 특이사항 → 특이사항 칸(G39:I40)
     const etcNotes: string[] = [];
