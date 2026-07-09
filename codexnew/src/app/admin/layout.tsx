@@ -99,6 +99,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         {can('QUESTIONS_MANAGE') && <NavLink href="/admin/questions">시험문제</NavLink>}
         {can('COURSES_MANAGE') && <NavLink href="/admin/courses">교육 과정</NavLink>}
         {isSuper && <NavLink href="/admin/admins">관리자</NavLink>}
+        <NavLink href="/admin/settings">내 서명</NavLink>
       </nav>
       <div className="px-4 py-6">{children}</div>
     </div>

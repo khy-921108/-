@@ -67,7 +67,7 @@ function SigRow({ label, sub, signature, who, at, pending, action }: {
 export default function AdminWorkPermitDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [data, setData] = useState<any>(null);
-  const [me, setMe] = useState<{ role: string; permissions: string[] } | null>(null);
+  const [me, setMe] = useState<{ role: string; permissions: string[]; signature?: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [banner, setBanner] = useState('');
@@ -156,6 +156,11 @@ export default function AdminWorkPermitDetailPage() {
   // R-6 작업개시/종료 여부 = 실제 started_at/종료확인 (status 컬럼은 포털 승인과 공유되어 신뢰 불가)
   const started = !!data.startedAt || !!comp.confirmSignature;
   const closed = !!comp.confirmSignature;
+
+  // R-6 ③-4: 서명자 이메일 → "부서 이름 직책" 라벨(미등록이면 이메일 앞부분)
+  const signerLabels: Record<string, string> = data.signerLabels ?? {};
+  const slabel = (email?: string | null) =>
+    email ? (signerLabels[email.toLowerCase()] || email.split('@')[0]) : '';
 
   const resetFields = () => { setSig(''); setTitle(''); setInstructions(tbm.safetyInstructions ?? ''); setReason(''); setRestoreState(comp.restoreState ?? ''); setCompletedAt(''); setModalErr(''); };
   const openModal = (m: ModalState) => { resetFields(); setModal(m); };
@@ -330,9 +335,9 @@ export default function AdminWorkPermitDetailPage() {
         <h2 className="font-bold text-slate-700 mb-1">승인 서명 (1·2차)</h2>
         <SigRow label="신청인" sub="TBM 팀장 겸용" signature={data.applicantSignature} who={info.applicantName} at={data.createdAt} />
         <SigRow label="안전관리자" sub="TBM 확인" signature={tbm.safetyManager?.signature} who={tbm.safetyManager?.name} />
-        <SigRow label="발급 (1차)" sub="안전환경" signature={data.issuer?.signature} who={data.issuer?.name} at={data.issuer?.at}
+        <SigRow label="발급 (1차)" sub="안전환경" signature={data.issuer?.signature} who={slabel(data.issuer?.name)} at={data.issuer?.at}
           action={hasApprove && !started ? btn(issuerSigned ? '재서명' : '1차 승인', () => { if (issuerSigned && !confirm('발급 서명을 다시 하면 덮어씁니다. 계속할까요?')) return; openModal({ type: 'issue' }); }) : null} />
-        <SigRow label="입회 (2차)" sub="안전환경 현장입회" signature={witness?.signature} who={witness?.by} at={witness?.at}
+        <SigRow label="입회 (2차)" sub="안전환경 현장입회" signature={witness?.signature} who={slabel(witness?.by)} at={witness?.at}
           action={hasApprove && !started ? (
             issuerSigned
               ? btn(witnessSigned ? '재서명' : '2차 승인', startWitness)
@@ -374,7 +379,7 @@ export default function AdminWorkPermitDetailPage() {
                     <div className="text-xs text-slate-600 min-w-0">
                       {proxy
                         ? <span className="text-amber-700 font-bold">긴급대리(안전환경)</span>
-                        : <span className="font-medium break-all">{dc.name || dc.by}</span>}
+                        : <span className="font-medium break-all">{dc.name || slabel(dc.by)}</span>}
                       {dc.at && <span className="text-slate-400"> · {fmtDateTime(dc.at)}</span>}
                       {proxy && dc.reason && <p className="text-[11px] text-amber-600">사유: {dc.reason}</p>}
                     </div>
@@ -412,9 +417,9 @@ export default function AdminWorkPermitDetailPage() {
       {/* 작업완료 (종료 2단계) */}
       <section className="card">
         <h2 className="font-bold text-slate-700 mb-1">작업완료 (종료 신고 → 확인)</h2>
-        <SigRow label="종료 신고" sub="작업자/소장(대리입력)" signature={comp.workerSignature} who={comp.reportBy} at={comp.reportAt}
+        <SigRow label="종료 신고" sub="작업자/소장(대리입력)" signature={comp.workerSignature} who={slabel(comp.reportBy)} at={comp.reportAt}
           action={hasApprove && !closed ? btn(reportDone ? '재신고' : '종료 신고', () => { if (reportDone && !confirm('종료신고를 다시 하면 덮어씁니다.')) return; openModal({ type: 'report' }); }) : null} />
-        <SigRow label="종료 확인" sub="안전환경 최종" signature={comp.confirmSignature} who={comp.confirmBy} at={comp.confirmAt}
+        <SigRow label="종료 확인" sub="안전환경 최종" signature={comp.confirmSignature} who={slabel(comp.confirmBy)} at={comp.confirmAt}
           action={hasApprove && !closed ? (
             reportDone
               ? btn(confirmDone ? '재확인' : '종료 확인', () => openModal({ type: 'confirm' }))
@@ -460,7 +465,20 @@ export default function AdminWorkPermitDetailPage() {
               </>
             )}
 
-            <div><label className="label">서명</label><SignaturePad onChange={setSig} /></div>
+            <div>
+              <label className="label">서명</label>
+              {modal.type !== 'report' && me?.signature && (
+                <div className="mb-2 flex items-center gap-2">
+                  <button type="button" onClick={() => setSig(me.signature!)}
+                    className={`text-xs px-3 py-1.5 rounded-lg font-bold border ${sig === me.signature ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-slate-300 text-slate-600'}`}>
+                    ✍ 등록 서명 사용
+                  </button>
+                  {sig === me.signature && <img src={me.signature} alt="등록 서명" className="h-8 border border-slate-200 rounded bg-white px-1" />}
+                  <span className="text-[11px] text-slate-400">또는 아래에 직접 서명</span>
+                </div>
+              )}
+              <SignaturePad onChange={setSig} />
+            </div>
             {modalErr && <p className="text-sm text-red-600">{modalErr}</p>}
             <div className="flex gap-2 justify-end pt-1">
               <button className="btn-secondary" onClick={() => setModal(null)} disabled={saving}>취소</button>

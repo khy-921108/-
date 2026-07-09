@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getDocsForOutput } from '@/lib/safety-doc-status';
 import { stageFromRow } from '@/lib/work-permit-stage';
+import { resolveSignerLabels } from '@/lib/work-permit-signer';
 
 /**
  * GET /api/work-permits/:id  (공개, UUID 알아야) — 인쇄/양식용 데이터
@@ -53,6 +54,21 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       { status: 500 }
     );
   }
+
+  // R-6 ③-4: 서명자 이메일 → "부서 이름 직책" 라벨 맵(표시용). 저장값은 이메일 그대로.
+  const tbmObj = (permit.tbm ?? {}) as Record<string, any>;
+  const compObj = (permit.completion ?? {}) as Record<string, any>;
+  const deptObj = (permit.dept_confirmations ?? {}) as Record<string, any>;
+  const signerEmails = [
+    permit.approved_by,
+    tbmObj.witness?.by,
+    compObj.reportBy,
+    compObj.confirmBy,
+    ...Object.values(deptObj).map((v: any) => v?.by),
+  ];
+  const signerLabelMap = await resolveSignerLabels(supabase, signerEmails);
+  const signerLabels: Record<string, string> = {};
+  for (const [k, v] of signerLabelMap) signerLabels[k] = v;
 
   // 1C-2 필수문서 데이터(인쇄 첨부용)
   let docs = null;
@@ -108,6 +124,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       deptConfirmations: permit.dept_confirmations ?? {},
       startedBy: permit.started_by ?? null,
       startedAt: permit.started_at ?? null,
+      signerLabels, // { email(소문자) → "부서 이름 직책" }
       participants: (parts ?? []).map((p: any) => ({
         name: p.name,
         companyName: p.company_name,

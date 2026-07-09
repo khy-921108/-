@@ -42,6 +42,11 @@ export interface AdminRecord {
   role: AdminRole;
   permissions: string[];
   isActive: boolean;
+  // R-6 ③-4: 등록 서명 프로필
+  displayName: string | null;
+  title: string | null;
+  department: string | null;
+  signature: string | null;
 }
 
 export type AdminAuthOk = { ok: true; user: { id: string; email: string }; admin: AdminRecord };
@@ -80,7 +85,7 @@ export async function requireAdmin(): Promise<AdminAuthResult> {
   const svc = createServiceClient();
   const { data: row, error } = await svc
     .from('admins')
-    .select('id, auth_user_id, email, role, permissions, is_active')
+    .select('id, auth_user_id, email, role, permissions, is_active, display_name, title, department, signature')
     .eq('email', email)
     .maybeSingle();
 
@@ -99,6 +104,10 @@ export async function requireAdmin(): Promise<AdminAuthResult> {
     role: row.role === 'SUPER' ? 'SUPER' : 'ADMIN',
     permissions: Array.isArray(row.permissions) ? (row.permissions as string[]) : [],
     isActive: !!row.is_active,
+    displayName: row.display_name ?? null,
+    title: row.title ?? null,
+    department: row.department ?? null,
+    signature: row.signature ?? null,
   };
   return { ok: true, user: { id: user.id, email }, admin };
 }

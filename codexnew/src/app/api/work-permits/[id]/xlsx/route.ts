@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import QRCode from 'qrcode';
 import { createServiceClient } from '@/lib/supabase/server';
 import { fillWorkPermitWorkbook, type PermitDocData } from '@/lib/work-permit-template';
+import { resolveSignerLabels, labelFor } from '@/lib/work-permit-signer';
 import { getDocsForOutput } from '@/lib/safety-doc-status';
 
 export const runtime = 'nodejs'; // exceljs + 템플릿 파일 읽기 + qrcode
@@ -105,6 +106,20 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     console.error('[work-permits/:id/xlsx] qr:', e);
   }
 
+  // R-6 ③-4: 서명자 이메일 → "부서 이름 직책" 라벨(출력 표기용)
+  const comp0 = (permit.completion ?? {}) as Record<string, any>;
+  const dept0 = (permit.dept_confirmations ?? {}) as Record<string, any>;
+  const smap = await resolveSignerLabels(supabase, [
+    permit.approved_by, tbm.witness?.by, comp0.confirmBy, comp0.reportBy,
+    ...Object.values(dept0).map((v: any) => v?.by),
+  ]);
+  // 완료 확인자·별지 확인자 표기를 라벨로 치환(출력 사본 — DB 무변경)
+  const completionOut = { ...comp0, confirmBy: labelFor(smap, comp0.confirmBy) || comp0.confirmBy };
+  const deptOut: Record<string, any> = {};
+  for (const [k, v] of Object.entries(dept0)) {
+    deptOut[k] = { ...(v as any), name: (v as any).name || labelFor(smap, (v as any).by) };
+  }
+
   const docData: PermitDocData = {
     permitNumber: permit.permit_number,
     companyName: permit.request_company_name,
@@ -126,7 +141,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     // ===== R-6 =====
     applicantSignature: permit.applicant_signature ?? null,
     issuer: {
-      name: permit.approved_by ?? null,
+      name: labelFor(smap, permit.approved_by) || permit.approved_by || null,
       title: permit.issuer_title ?? null,
       signature: permit.issuer_signature ?? null,
       at: permit.approved_at ?? null,
@@ -138,14 +153,14 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       mode: permit.approval_mode ?? null,
       at: permit.approver_signed_at ?? null,
     },
-    completion: (permit.completion ?? {}) as PermitDocData['completion'],
+    completion: completionOut as PermitDocData['completion'],
     // R-6 ③-2a: 입회자(2차)·안전지시사항 = tbm JSONB
     witness: tbm.witness
-      ? { name: tbm.witness.by ?? null, signature: tbm.witness.signature ?? null, at: tbm.witness.at ?? null }
+      ? { name: labelFor(smap, tbm.witness.by) || tbm.witness.by || null, signature: tbm.witness.signature ?? null, at: tbm.witness.at ?? null }
       : null,
     safetyInstructions: typeof tbm.safetyInstructions === 'string' ? tbm.safetyInstructions : null,
     // R-6 ③-2b: 3차 별지 현장확인
-    deptConfirmations: (permit.dept_confirmations ?? {}) as PermitDocData['deptConfirmations'],
+    deptConfirmations: deptOut as PermitDocData['deptConfirmations'],
     tbmExtra: {
       workContent: tbm.workContent ?? null,
       riskFactors: Array.isArray(tbm.riskFactors) ? tbm.riskFactors : [],
