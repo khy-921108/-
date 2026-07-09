@@ -4,6 +4,10 @@ import { getDocsForOutput } from '@/lib/safety-doc-status';
 import { stageFromRow } from '@/lib/work-permit-stage';
 import { resolveSignerLabels } from '@/lib/work-permit-signer';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic'; // ⚠️ 캐시 금지 — 재서명/종료확인 즉시 반영
+export const fetchCache = 'force-no-store';
+
 /**
  * GET /api/work-permits/:id  (공개, UUID 알아야) — 인쇄/양식용 데이터
  * - 안전조치 없음(현장 빈칸). 1C-2 필수문서(docs) 포함.

@@ -6,6 +6,8 @@ import { resolveSignerLabels, labelFor } from '@/lib/work-permit-signer';
 import { getDocsForOutput } from '@/lib/safety-doc-status';
 
 export const runtime = 'nodejs'; // exceljs + 템플릿 파일 읽기 + qrcode
+export const dynamic = 'force-dynamic'; // ⚠️ 캐시 금지 — 없으면 옛 서명/종료확인 누락된 xlsx가 캐시됨
+export const fetchCache = 'force-no-store'; // Supabase 조회를 항상 최신으로
 
 /**
  * GET /api/work-permits/:id/xlsx  (공개, UUID 알아야) — 회사 양식 자동채움 다운로드

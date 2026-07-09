@@ -532,6 +532,15 @@ function fillSupplementalHeader(
     placeImage(wb, ws, comp.workerSignature ?? data.applicantSignature, t.done.workerSig, 72, 18, 0.05, 0.1);
     if (comp.workerSignature ?? data.applicantSignature) placeSigLog(wb, ws, t.done.workerSig, info.applicantName, comp.completedAt, 72);
   }
+  // 별지 종료확인(확인자) = 완료행 바로 아래 (E{r+1} 라벨 / I{r+1} 서명). 마스터 E38/I38 과 동일 데이터.
+  if (comp?.confirmSignature) {
+    const doneRow = parseInt(t.done.workerSig.replace(/[A-Z]+/, ''), 10);
+    const cLabelCell = `E${doneRow + 1}`;
+    const cSigCell = `I${doneRow + 1}`;
+    setCell(ws, cLabelCell, `확인자: ${comp.confirmBy ?? ''}`);
+    placeImage(wb, ws, comp.confirmSignature, cSigCell, 72, 18, 0.05, 0.1);
+    placeSigLog(wb, ws, cSigCell, comp.confirmBy, comp.confirmAt, 72);
+  }
   // R-6 ③-2b: 3차 현장확인 → 별지 "관련부서(해당 시)" 행. 긴급대리는 공무 서명인 척 금지(명시 라벨).
   const dc = data.deptConfirmations?.[t.key];
   if (dc?.signature) {
@@ -686,7 +695,11 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
   const smSig = sm?.signature ?? data.witness?.signature ?? null;
   const smName = sm?.name ?? (smSig ? '안전환경' : null);
   if (smName) setCell(ts, T.smName, smName);
-  if (smSig) placeImage(wb, ts, smSig, T.smSig, 74, 20, 0.1, 0.05);
+  if (smSig) {
+    placeImage(wb, ts, smSig, T.smSig, 74, 20, 0.1, 0.05);
+    // 안전관리자 = 안전환경(2차 입회) → 로그도 입회 시각·라벨 사용
+    placeSigLog(wb, ts, T.smSig, smName, data.witness?.at, 74);
+  }
   // ▶ 작업내용(행 9~14에 줄 단위 분배: 잘림 방지) / 위험요인 / 안전대책
   const rs = T.contentRowStart;
   if (te?.workContent) {
