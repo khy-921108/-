@@ -467,16 +467,6 @@ export default function AdminWorkPermitDetailPage() {
 
             <div>
               <label className="label">서명</label>
-              {modal.type !== 'report' && me?.signature && (
-                <div className="mb-2 flex items-center gap-2">
-                  <button type="button" onClick={() => setSig(me.signature!)}
-                    className={`text-xs px-3 py-1.5 rounded-lg font-bold border ${sig === me.signature ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-slate-300 text-slate-600'}`}>
-                    ✍ 등록 서명 사용
-                  </button>
-                  {sig === me.signature && <img src={me.signature} alt="등록 서명" className="h-8 border border-slate-200 rounded bg-white px-1" />}
-                  <span className="text-[11px] text-slate-400">또는 아래에 직접 서명</span>
-                </div>
-              )}
               <SignaturePad onChange={setSig} />
             </div>
             {modalErr && <p className="text-sm text-red-600">{modalErr}</p>}

@@ -24,34 +24,45 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   const body = await req.json().catch(() => ({}));
   const action = body.action;
   const actor = typeof body.actor === 'string' && body.actor ? body.actor : 'portal';
+  const signature = typeof body.signature === 'string' ? body.signature : '';
+  const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim() : null;
   if (action !== 'APPROVE' && action !== 'REJECT') {
     return NextResponse.json({ error: 'INVALID_ACTION' }, { status: 400 });
+  }
+  // B안: 승인 = 1차 발급(손서명 필수). 서명 없는 APPROVE 거부(반쪽 승인 방지).
+  if (action === 'APPROVE' && !signature.startsWith('data:image/')) {
+    return NextResponse.json({ error: 'SIGNATURE_REQUIRED', message: '승인하려면 손서명이 필요합니다.' }, { status: 400 });
   }
 
   const supabase = createServiceClient();
   const { data: permit } = await supabase
     .from('work_permits')
-    .select('id, status, permit_number, applicant_phone')
+    .select('id, status, permit_number, applicant_phone, issuer_signature')
     .eq('id', ctx.params.id)
     .maybeSingle();
 
   if (!permit) return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 });
-  if (permit.status !== 'SUBMITTED') {
+  // 이미 1차 승인(발급 서명)된 건 재승인/반려 금지(관리자·포털 이중승인 방지)
+  if (permit.issuer_signature || permit.status !== 'SUBMITTED') {
     return NextResponse.json(
-      { error: 'ALREADY_PROCESSED', currentStatus: permit.status },
+      { error: 'ALREADY_PROCESSED', currentStatus: permit.issuer_signature ? 'APPROVED' : permit.status },
       { status: 409 }
     );
   }
 
-  const newStatus = action === 'APPROVE' ? 'APPROVED' : 'REJECTED';
-  const { error } = await supabase
-    .from('work_permits')
-    .update({ status: newStatus, approved_by: actor, approved_at: new Date().toISOString() })
-    .eq('id', ctx.params.id);
+  const now = new Date().toISOString();
+  // APPROVE = 관리자 1차 발급과 동일: issuer_signature + approved_by/at (status 미변경 — 단계뱃지는 서명 기반).
+  // REJECT  = status REJECTED (서명 불필요).
+  const update =
+    action === 'APPROVE'
+      ? { issuer_signature: signature, issuer_title: title, approved_by: actor, approved_at: now }
+      : { status: 'REJECTED', approved_by: actor, approved_at: now };
+  const { error } = await supabase.from('work_permits').update(update).eq('id', ctx.params.id);
 
   if (error) {
     return NextResponse.json({ error: 'UPDATE_FAILED', message: error.message }, { status: 500 });
   }
+  const newStatus = action === 'APPROVE' ? 'APPROVED' : 'REJECTED';
 
   // [R-5] 신청자 통지 문자 — best-effort (실패해도 본 처리는 성공 유지)
   try {

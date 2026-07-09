@@ -30,6 +30,7 @@ export async function GET(req: Request) {
       .from('work_permits')
       .select('id, permit_number, request_company_name, work_name, applicant_name, work_start')
       .eq('status', 'SUBMITTED')
+      .is('issuer_signature', null) // B안: 1차 승인(발급 서명)된 건은 대기목록에서 제외(관리자·포털 공통)
       .order('work_start', { ascending: true }),
   ]);
 
