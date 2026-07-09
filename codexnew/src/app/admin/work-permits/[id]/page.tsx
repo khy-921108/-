@@ -77,6 +77,10 @@ export default function AdminWorkPermitDetailPage() {
   const [error, setError] = useState('');
   const [banner, setBanner] = useState('');
 
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [witnessWarn, setWitnessWarn] = useState(false);
+
   const [modal, setModal] = useState<ModalState>(null);
   const [sig, setSig] = useState('');
   const [title, setTitle] = useState('');
@@ -89,15 +93,18 @@ export default function AdminWorkPermitDetailPage() {
 
   const load = useCallback(async () => {
     try {
-      const [pRes, mRes] = await Promise.all([
+      const [pRes, mRes, phRes] = await Promise.all([
         fetch(`/api/work-permits/${id}`, { cache: 'no-store' }),
         fetch(`/api/admin/me`, { cache: 'no-store' }),
+        fetch(`/api/admin/work-permits/${id}/tbm-photos`, { cache: 'no-store' }),
       ]);
       const pJson = await pRes.json();
       if (pJson.success) setData(pJson.data);
       else setError(pJson.message || '조회 실패');
       const mJson = await mRes.json();
       if (mJson.success) setMe(mJson.data);
+      const phJson = await phRes.json().catch(() => null);
+      if (phJson?.success) setPhotoUrls(phJson.data.urls ?? []);
     } catch {
       setError('네트워크 오류');
     } finally {
@@ -123,6 +130,8 @@ export default function AdminWorkPermitDetailPage() {
   const participants: any[] = data.participants ?? [];
   const photoCount = Array.isArray(tbm.photos) ? tbm.photos.length : 0;
   const tbmStarted = photoCount > 0 || !!(tbm.safetyInstructions && String(tbm.safetyInstructions).trim());
+  const confirmedCount = confs.filter((c) => c.signature).length;
+  const tbmHasContent = photoCount > 0 || confirmedCount > 0; // ③-2c: 2차 경고 판단(사진 또는 작업자 서명)
 
   const isSuper = me?.role === 'SUPER';
   const perms = me?.permissions ?? [];
@@ -147,6 +156,13 @@ export default function AdminWorkPermitDetailPage() {
 
   const resetFields = () => { setSig(''); setTitle(''); setInstructions(tbm.safetyInstructions ?? ''); setReason(''); setRestoreState(comp.restoreState ?? ''); setCompletedAt(''); setModalErr(''); };
   const openModal = (m: ModalState) => { resetFields(); setModal(m); };
+
+  // 2차 승인 진입 — TBM(사진·작업자 서명) 없으면 경고 후 진행(게이트 잠금 아님)
+  const startWitness = () => {
+    if (witnessSigned && !confirm('입회 서명을 다시 하면 덮어씁니다. 계속할까요?')) return;
+    if (!tbmHasContent) { setWitnessWarn(true); return; }
+    openModal({ type: 'witness' });
+  };
 
   const submitSig = async () => {
     if (!modal) return;
@@ -258,14 +274,47 @@ export default function AdminWorkPermitDetailPage() {
         </table>
       </section>
 
-      {/* TBM 상세 */}
-      <section className="card text-sm space-y-1.5">
-        <h2 className="font-bold text-slate-700 mb-2">TBM 상세</h2>
-        <Row k="위험요인" v={(tbm.riskFactors ?? []).join(', ')} />
-        <Row k="안전대책" v={(tbm.safetyMeasures ?? []).join(', ')} />
+      {/* TBM 상세 — 실제 내용(사진·작업자 서명) 표시: "보고 승인" */}
+      <section className="card text-sm space-y-3">
+        <h2 className="font-bold text-slate-700">TBM 상세 <span className="text-[11px] font-normal text-slate-400">(2차 승인 전 확인)</span></h2>
+        <ListRow k="위험요인" items={tbm.riskFactors} />
+        <ListRow k="안전대책" items={tbm.safetyMeasures} />
         <Row k="안전관리자" v={tbm.safetyManager?.name} />
-        <Row k="현장사진" v={photoCount > 0 ? `${photoCount}장 첨부` : '없음'} />
         <Row k="안전지시사항" v={tbm.safetyInstructions} />
+
+        {/* 현장 사진 */}
+        <div>
+          <p className="text-slate-400 mb-1">현장 사진 ({photoCount})</p>
+          {photoUrls.length > 0 ? (
+            <div className="flex gap-2 flex-wrap">
+              {photoUrls.map((u, i) => (
+                <img key={i} src={u} alt={`TBM사진${i + 1}`} onClick={() => setLightbox(u)}
+                  className="w-28 h-16 object-cover rounded border border-slate-200 cursor-zoom-in hover:opacity-80" />
+              ))}
+            </div>
+          ) : (
+            <p className="text-slate-300 text-xs">사진 없음</p>
+          )}
+        </div>
+
+        {/* 작업자 TBM 서명 */}
+        <div>
+          <p className="text-slate-400 mb-1">작업자 TBM 서명 ({confirmedCount}/{participants.length})</p>
+          <div className="flex flex-wrap gap-2">
+            {participants.map((p, i) => {
+              const nm = (p.name ?? '').trim();
+              const c = confByName.get(nm);
+              const s = c?.signature;
+              return (
+                <div key={i} className="border border-slate-200 rounded p-1 w-24 text-center">
+                  {s ? <img src={s} alt={`${nm} 서명`} className="h-8 mx-auto bg-white" />
+                     : <div className="h-8 flex items-center justify-center text-[11px] text-amber-600 font-bold">미확인</div>}
+                  <p className="text-[10px] text-slate-500 truncate mt-0.5">{p.name}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </section>
 
       {/* 서명 현황 + 1·2차 액션 */}
@@ -278,7 +327,7 @@ export default function AdminWorkPermitDetailPage() {
         <SigRow label="입회 (2차)" sub="안전환경 현장입회" signature={witness?.signature} who={witness?.by} at={witness?.at}
           action={hasApprove && !started ? (
             issuerSigned
-              ? btn(witnessSigned ? '재서명' : '2차 승인', () => { if (witnessSigned && !confirm('입회 서명을 다시 하면 덮어씁니다. 계속할까요?')) return; openModal({ type: 'witness' }); })
+              ? btn(witnessSigned ? '재서명' : '2차 승인', startWitness)
               : <span className="text-[11px] text-slate-400">1차 후 가능</span>
           ) : null} />
       </section>
@@ -412,7 +461,42 @@ export default function AdminWorkPermitDetailPage() {
           </div>
         </div>
       )}
+
+      {/* 2차 TBM 미완료 경고 */}
+      {witnessWarn && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setWitnessWarn(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-bold text-amber-700">⚠️ TBM 미완료</h3>
+            <p className="text-sm text-slate-600">TBM 현장 사진·작업자 서명이 하나도 없습니다. 현장 TBM을 확인하고 서명하시겠습니까?</p>
+            <div className="flex gap-2 justify-end pt-1">
+              <button className="btn-secondary" onClick={() => setWitnessWarn(false)}>취소</button>
+              <button className="btn-primary" onClick={() => { setWitnessWarn(false); openModal({ type: 'witness' }); }}>확인하고 진행</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 사진 라이트박스 */}
+      {lightbox && (
+        <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt="사진 확대" className="max-h-full max-w-full rounded" />
+        </div>
+      )}
     </main>
+  );
+}
+
+function ListRow({ k, items }: { k: string; items?: string[] | null }) {
+  const arr = (items ?? []).filter((x) => x && String(x).trim());
+  return (
+    <div className="flex gap-2">
+      <span className="w-24 shrink-0 text-slate-400">{k}</span>
+      {arr.length > 0 ? (
+        <ul className="list-disc pl-4 text-slate-800 space-y-0.5">{arr.map((x, i) => <li key={i}>{x}</li>)}</ul>
+      ) : (
+        <span className="text-slate-800">-</span>
+      )}
+    </div>
   );
 }
 
