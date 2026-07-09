@@ -624,12 +624,12 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
   // 신청인: 텍스트 B3:G3 + 서명칸 H3:I3
   placeImage(wb, gs, data.applicantSignature, 'H3', 84, 20, 0.1, 0.05);
   if (data.applicantSignature) placeSigLog(wb, gs, 'H3', info.applicantName, data.createdAt, 84);
-  // A37 승인자(요청부서 현장책임자) — 부서/직책 + 성명만. 서명칸 D37은 gate ③.
-  // (승인 방식 SITE/REMOTE 는 DB에만 기록, 출력물엔 표기하지 않음 — 사용자 지시 2026-07-08)
-  if (data.approval?.name || data.approval?.title) {
-    setCell(gs, 'A37', `승인자(요청부서 현장책임자)   ${data.approval?.title ?? ''}  ${data.approval?.name ?? ''}`);
+  // A37 승인자(요청부서 현장책임자) — "직책:" 프리필 제거, "성명:"만 유지(사용자 지시 2026-07-09).
+  //  (승인자 이름 있으면 성명 뒤에 채움. 승인 방식 SITE/REMOTE 는 출력 미표기.)
+  setCell(gs, 'A37', `승인자(요청부서 현장책임자)   성명: ${data.approval?.name ?? ''}`);
+  if (data.approval?.signature) {
     placeImage(wb, gs, data.approval?.signature, 'D37', 76, 18, 0.05, 0.1);
-    if (data.approval?.signature) placeSigLog(wb, gs, 'D37', data.approval?.name, data.approval?.at, 76);
+    placeSigLog(wb, gs, 'D37', data.approval?.name, data.approval?.at, 76);
   }
   // A38 발급자(안전환경담당) — 서명칸 D38, gate ③
   if (data.issuer?.name) {
