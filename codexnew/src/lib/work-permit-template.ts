@@ -598,13 +598,9 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
   // ===== 일반위험작업허가서 =====
   setCell(gs, G.permitNumber, data.permitNumber);
   setCell(gs, G.permitDate, fmtDate(data.createdAt));
-  // 신청인: 직책/성명 + (서명) 표식 유지(실서명 공란)
+  // 신청인: 직책/성명 (실서명 이미지가 옆칸 H3에 들어가므로 "(서명)" 프리필 글자 제거)
   const title = (info.applicantTitle ?? '').trim();
-  setCell(
-    gs,
-    G.applicant,
-    `직책: ${title}    성명: ${info.applicantName}                    (서명)`
-  );
+  setCell(gs, G.applicant, `직책: ${title}    성명: ${info.applicantName}`);
   // 허가기간: 시작 전체 ~ 종료 시각 — 당일 원칙 명시
   setCell(
     gs,
