@@ -8,7 +8,18 @@ import {
   type SupplementalKey,
 } from '@/lib/work-permit-constants';
 
+export const runtime = 'nodejs';
 export const fetchCache = 'force-no-store';
+export const maxDuration = 30; // 무한 대기 방지(초과 시 함수 종료)
+
+const DB_TIMEOUT_MS = 12000;
+/** DB 호출이 매달리면 무한 pending 대신 에러로 반환 — 저장 요청은 반드시 응답한다. */
+function withTimeout<T>(p: PromiseLike<T>, label: string): Promise<T> {
+  return Promise.race([
+    Promise.resolve(p),
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`DB_TIMEOUT:${label}`)), DB_TIMEOUT_MS)),
+  ]);
+}
 
 /**
  * PATCH /api/admin/work-permits/:id  — R-6 게이트③ 승인/서명/확인/종료
@@ -48,11 +59,18 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   }
 
   const supabase = createServiceClient();
-  const { data: permit, error: readErr } = await supabase
-    .from('work_permits')
-    .select('id, status, supplemental, issuer_signature, tbm, dept_confirmations, completion')
-    .eq('id', ctx.params.id)
-    .maybeSingle();
+  const patchPermit = (fields: Record<string, any>) =>
+    withTimeout(supabase.from('work_permits').update(fields).eq('id', ctx.params.id), 'update') as Promise<{ error: any }>;
+
+  try {
+  const { data: permit, error: readErr } = await withTimeout(
+    supabase
+      .from('work_permits')
+      .select('id, status, supplemental, issuer_signature, tbm, dept_confirmations, completion')
+      .eq('id', ctx.params.id)
+      .maybeSingle(),
+    'select'
+  );
 
   if (readErr) {
     console.error('[admin/work-permits PATCH] read:', readErr);
@@ -72,10 +90,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   if (action === 'issue') {
     if (!hasApprove) return forbidden();
     const title = typeof body?.title === 'string' && body.title.trim() ? body.title.trim() : null;
-    const { error } = await supabase
-      .from('work_permits')
-      .update({ issuer_signature: signature, issuer_title: title, approved_by: actor, approved_at: now })
-      .eq('id', ctx.params.id);
+    const { error } = await patchPermit({ issuer_signature: signature, issuer_title: title, approved_by: actor, approved_at: now });
     if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
     return NextResponse.json({ success: true, data: { action, by: actor, at: now } });
   }
@@ -88,7 +103,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     const tbm = (permit.tbm ?? {}) as Record<string, any>;
     tbm.safetyInstructions = instructions;
     tbm.witness = { signature, at: now, by: actor };
-    const { error } = await supabase.from('work_permits').update({ tbm }).eq('id', ctx.params.id);
+    const { error } = await patchPermit({ tbm });
     if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
     return NextResponse.json({ success: true, data: { action, by: actor, at: now } });
   }
@@ -116,7 +131,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
       const name = typeof body?.name === 'string' && body.name.trim() ? body.name.trim() : null;
       confs[supKey] = { dept, by: actor, name, signature, at: now, mode: 'NORMAL', reason: null };
     }
-    const { error } = await supabase.from('work_permits').update({ dept_confirmations: confs }).eq('id', ctx.params.id);
+    const { error } = await patchPermit({ dept_confirmations: confs });
     if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
     return NextResponse.json({ success: true, data: { action, supKey, dept, by: actor, at: now } });
   }
@@ -131,7 +146,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     comp.restoreState = typeof body?.restoreState === 'string' ? body.restoreState.trim() : (comp.restoreState ?? '');
     comp.reportBy = actor;
     comp.reportAt = now;
-    const { error } = await supabase.from('work_permits').update({ completion: comp }).eq('id', ctx.params.id);
+    const { error } = await patchPermit({ completion: comp });
     if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
     return NextResponse.json({ success: true, data: { action, by: actor, at: now } });
   }
@@ -143,10 +158,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     comp.confirmSignature = signature;
     comp.confirmBy = actor;
     comp.confirmAt = now;
-    const { error } = await supabase
-      .from('work_permits')
-      .update({ completion: comp, status: 'COMPLETED' })
-      .eq('id', ctx.params.id);
+    const { error } = await patchPermit({ completion: comp, status: 'COMPLETED' });
     if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
     return NextResponse.json({ success: true, data: { action, by: actor, at: now, status: 'COMPLETED' } });
   }
@@ -170,13 +182,23 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     if (missing.length > 0) {
       return fail('GATE_BLOCKED', `작업개시 차단 — 미완료: ${missing.join(', ')}`, 409);
     }
-    const { error } = await supabase
-      .from('work_permits')
-      .update({ status: 'APPROVED', started_by: actor, started_at: now })
-      .eq('id', ctx.params.id);
+    const { error } = await patchPermit({ status: 'APPROVED', started_by: actor, started_at: now });
     if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
     return NextResponse.json({ success: true, data: { action, by: actor, at: now, status: 'APPROVED' } });
   }
 
   return fail('BAD_ACTION', '알 수 없는 동작입니다.');
+  } catch (e) {
+    const msg = (e as Error)?.message ?? '';
+    console.error('[admin/work-permits PATCH] fatal:', msg);
+    const timeout = msg.startsWith('DB_TIMEOUT');
+    return NextResponse.json(
+      {
+        success: false,
+        code: timeout ? 'DB_TIMEOUT' : 'SERVER_ERROR',
+        message: timeout ? '저장이 지연되어 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.' : '서버 오류가 발생했습니다.',
+      },
+      { status: timeout ? 504 : 500 }
+    );
+  }
 }

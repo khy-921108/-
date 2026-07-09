@@ -18,6 +18,7 @@ export type StageKey =
   | 'WITNESS_WAIT'  // 2차 승인 대기
   | 'THIRD_CHECK'   // 3차 확인 필요
   | 'START_READY'   // 작업개시 가능
+  | 'IN_PROGRESS'   // 승인 진행중 (목록 경량뱃지 — 중간단계 통합)
   | 'STARTED'       // 작업개시
   | 'CLOSED'        // 작업종료
   | 'REJECTED';     // 반려
@@ -78,6 +79,20 @@ export function stageFromRow(row: any): Stage {
   });
 }
 
+/**
+ * 목록용 경량 판정 — 무거운 tbm/서명 blob 없이 가벼운 컬럼만으로 계산.
+ * (목록은 500행까지라 base64 서명을 대량 조회하면 응답이 커져 쓰기 경합 유발 → 조회 최소화)
+ * 정확: 대기/작업개시(started_at)/작업종료(status COMPLETED=R-6 전용)/반려. 중간단계는 '승인 진행중'으로 통합.
+ * 상세화면은 단일행이라 computeStage 로 정밀 표시.
+ */
+export function stageFromLightRow(row: any): Stage {
+  if ((row?.status ?? '') === 'COMPLETED') return { key: 'CLOSED', label: '작업종료' };
+  if (row?.started_at) return { key: 'STARTED', label: '작업개시' };
+  if ((row?.status ?? '') === 'REJECTED') return { key: 'REJECTED', label: '반려' };
+  if (!isSig(row?.issuer_signature)) return { key: 'WAITING', label: '대기' };
+  return { key: 'IN_PROGRESS', label: '승인 진행중' };
+}
+
 /** 뱃지 색상 클래스(Tailwind) — 화면 공통 */
 export const STAGE_BADGE_CLASS: Record<StageKey, string> = {
   WAITING: 'bg-slate-100 text-slate-600',
@@ -85,6 +100,7 @@ export const STAGE_BADGE_CLASS: Record<StageKey, string> = {
   WITNESS_WAIT: 'bg-amber-100 text-amber-700',
   THIRD_CHECK: 'bg-orange-100 text-orange-700',
   START_READY: 'bg-sky-100 text-sky-700',
+  IN_PROGRESS: 'bg-amber-100 text-amber-700',
   STARTED: 'bg-emerald-100 text-emerald-700',
   CLOSED: 'bg-indigo-100 text-indigo-700',
   REJECTED: 'bg-red-100 text-red-700',

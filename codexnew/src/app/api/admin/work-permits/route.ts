@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getSignatureStatusForPermits } from '@/lib/safety-doc-status';
-import { stageFromRow } from '@/lib/work-permit-stage';
+import { stageFromLightRow } from '@/lib/work-permit-stage';
 
 /**
  * GET /api/admin/work-permits  (requireAdmin) — 신청 목록
@@ -24,7 +24,7 @@ export async function GET(req: Request) {
     .select(
       `id, permit_number, permit_type, request_company_name, work_name, work_start, work_end,
        applicant_name, supplemental, status, approved_by, approved_at, created_at,
-       issuer_signature, tbm, dept_confirmations, started_at, completion`
+       issuer_signature, started_at`
     )
     .order('work_start', { ascending: false })
     .limit(500);
@@ -90,7 +90,7 @@ export async function GET(req: Request) {
       participantCount: countMap.get(p.id) ?? 0,
       supplemental: p.supplemental ?? {},
       status: p.status,
-      stage: stageFromRow(p), // R-6 진행단계(뱃지) — status 컬럼 오염 방지
+      stage: stageFromLightRow(p), // R-6 진행단계(목록 경량뱃지) — 무거운 서명 blob 조회 회피
       approvedBy: p.approved_by ?? null,
       approvedAt: p.approved_at ?? null,
       createdAt: p.created_at,
