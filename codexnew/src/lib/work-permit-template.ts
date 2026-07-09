@@ -607,13 +607,14 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
   // 현장소장/안전담당 = 신청인. 서명은 전용 칸(D6).
   setCell(ts, T.leaderName, info.applicantName);
   placeImage(wb, ts, te?.teamLeaderSignature ?? data.applicantSignature, T.leaderSig, 74, 20, 0.1, 0.05);
-  // 안전관리자(사내 확인·결재) — 성명(G6) + 서명칸(I6). 미확인 시 공란.
-  // R-6 ⓓ: 소속(G5)은 발주사 "동남" 고정 — v5 템플릿 프리필 그대로, 코드에서 덮어쓰지 않음.
+  // 안전관리자(사내 확인·결재) — 성명(G6) + 서명칸(I6). 소속(G5)은 "동남" 프리필 유지.
+  // 버그2 A안(③-4): 안전관리자 = 안전환경(TBM 확인자) → 2차(입회) 서명을 재사용.
+  //  구 신청폼 안전관리자 입력(sm)이 있으면 우선, 없으면 witness(2차) 서명·"안전환경".
   const sm = te?.safetyManager;
-  if (sm?.name) {
-    setCell(ts, T.smName, sm.name);
-    placeImage(wb, ts, sm.signature, T.smSig, 74, 20, 0.1, 0.05);
-  }
+  const smSig = sm?.signature ?? data.witness?.signature ?? null;
+  const smName = sm?.name ?? (smSig ? '안전환경' : null);
+  if (smName) setCell(ts, T.smName, smName);
+  if (smSig) placeImage(wb, ts, smSig, T.smSig, 74, 20, 0.1, 0.05);
   // ▶ 작업내용(행 9~14에 줄 단위 분배: 잘림 방지) / 위험요인 / 안전대책
   const rs = T.contentRowStart;
   if (te?.workContent) {
