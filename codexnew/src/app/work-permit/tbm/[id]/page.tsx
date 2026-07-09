@@ -57,11 +57,19 @@ export default function SiteTbmPage() {
   const [submitted, setSubmitted] = useState(false);
 
   const call = useCallback(async (c: Cred, extra: any) => {
-    const res = await fetch(`/api/work-permits/${id}/tbm`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...c, ...extra }),
-    });
-    return res.json();
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 20000); // 무한 대기 방지
+    try {
+      const res = await fetch(`/api/work-permits/${id}/tbm`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...c, ...extra }), signal: ac.signal,
+      });
+      return await res.json();
+    } catch {
+      return { success: false, message: '처리가 지연되었거나 네트워크 오류입니다. 다시 시도해 주세요.' };
+    } finally {
+      clearTimeout(t);
+    }
   }, [id]);
 
   const loadSession = useCallback(async (c: Cred) => {

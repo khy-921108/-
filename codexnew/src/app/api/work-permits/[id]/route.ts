@@ -65,14 +65,39 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
   const deptObj = (permit.dept_confirmations ?? {}) as Record<string, any>;
   const signerEmails = [
     permit.approved_by,
+    permit.started_by,
     tbmObj.witness?.by,
     compObj.reportBy,
     compObj.confirmBy,
     ...Object.values(deptObj).map((v: any) => v?.by),
   ];
   const signerLabelMap = await resolveSignerLabels(supabase, signerEmails);
-  const signerLabels: Record<string, string> = {};
-  for (const [k, v] of signerLabelMap) signerLabels[k] = v;
+  // 표시명 변환기(공개 응답에 이메일 원문 노출 금지 — 등록명 or 이메일 앞부분)
+  const lab = (email?: string | null): string | null => {
+    if (!email) return null;
+    return signerLabelMap.get(String(email).toLowerCase()) || String(email).split('@')[0] || null;
+  };
+
+  // ⚠️ 공개 응답 정화(3차 감사 발견1): tbm.confirmations 키의 전화번호 제거 + 서명자 이메일→표시명.
+  //  (관리자 상세는 Object.values(confirmations)의 name/서명만 쓰므로 키 재작성 안전)
+  const safeConfirmations: Record<string, any> = {};
+  let _ci = 0;
+  for (const c of Object.values(tbmObj.confirmations ?? {}) as any[]) {
+    safeConfirmations[`c${_ci++}`] = { name: c?.name ?? null, signature: c?.signature ?? null, confirmedAt: c?.confirmedAt ?? null };
+  }
+  const safeTbm = {
+    ...tbmObj,
+    confirmations: safeConfirmations,
+    witness: tbmObj.witness
+      ? { signature: tbmObj.witness.signature ?? null, at: tbmObj.witness.at ?? null, by: lab(tbmObj.witness.by) }
+      : undefined,
+  };
+  const safeCompletion = { ...compObj, reportBy: lab(compObj.reportBy), confirmBy: lab(compObj.confirmBy) };
+  const safeDept: Record<string, any> = {};
+  for (const [k, v] of Object.entries(deptObj)) {
+    const vv = v as any;
+    safeDept[k] = { ...vv, by: lab(vv.by), name: vv.name || lab(vv.by) };
+  }
 
   // 1C-2 필수문서 데이터(인쇄 첨부용)
   let docs = null;
@@ -108,27 +133,26 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
         equipmentNo: permit.equipment_no,
       },
       supplemental: permit.supplemental ?? {},
-      tbm: permit.tbm ?? {},
+      tbm: safeTbm, // 정화됨(전화번호·이메일 제거)
       // R-6: 신청인 서명 / 발급자(안전환경) / 승인자(요청부서 현장책임자) / 작업완료
       applicantSignature: permit.applicant_signature ?? null,
       issuer: {
-        name: permit.approved_by ?? null,
+        name: lab(permit.approved_by), // 이메일 대신 표시명
         title: permit.issuer_title ?? null,
         signature: permit.issuer_signature ?? null,
         at: permit.approved_at ?? null,
       },
       approval: {
-        name: permit.approver_name ?? null,
+        name: permit.approver_name ?? null, // 이메일 아님(수기 성명)
         title: permit.approver_title ?? null,
         signature: permit.approver_signature ?? null,
         mode: permit.approval_mode ?? null,
         at: permit.approver_signed_at ?? null,
       },
-      completion: permit.completion ?? {},
-      deptConfirmations: permit.dept_confirmations ?? {},
-      startedBy: permit.started_by ?? null,
+      completion: safeCompletion,
+      deptConfirmations: safeDept,
+      startedBy: lab(permit.started_by),
       startedAt: permit.started_at ?? null,
-      signerLabels, // { email(소문자) → "부서 이름 직책" }
       participants: (parts ?? []).map((p: any) => ({
         name: p.name,
         companyName: p.company_name,

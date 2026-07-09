@@ -4,6 +4,15 @@ import { createServiceClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 export const fetchCache = 'force-no-store';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
+
+function withTimeout<T>(p: PromiseLike<T>, label: string): Promise<T> {
+  return Promise.race([
+    Promise.resolve(p),
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`TIMEOUT:${label}`)), 12000)),
+  ]);
+}
 
 /**
  * GET /api/admin/work-permits/:id/tbm-photos  (requireAdmin) — R-6 게이트③-2c
@@ -15,11 +24,11 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
   if (!auth.ok) return auth.response;
 
   const supabase = createServiceClient();
-  const { data: permit, error } = await supabase
-    .from('work_permits')
-    .select('id, tbm')
-    .eq('id', ctx.params.id)
-    .maybeSingle();
+  try {
+  const { data: permit, error } = await withTimeout(
+    supabase.from('work_permits').select('id, tbm').eq('id', ctx.params.id).maybeSingle(),
+    'select'
+  );
 
   if (error) {
     console.error('[tbm-photos] read:', error);
@@ -34,13 +43,22 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
   const urls: string[] = [];
   for (const p of paths) {
     try {
-      const { data: signed, error: sErr } = await supabase.storage
-        .from('work-permit-photos')
-        .createSignedUrl(p, 600); // 10분
+      const { data: signed, error: sErr } = await withTimeout(
+        supabase.storage.from('work-permit-photos').createSignedUrl(p, 600),
+        'sign'
+      );
       if (!sErr && signed?.signedUrl) urls.push(signed.signedUrl);
     } catch (e) {
       console.error('[tbm-photos] sign:', e);
     }
   }
   return NextResponse.json({ success: true, data: { urls } });
+  } catch (e) {
+    const msg = (e as Error)?.message ?? '';
+    const timeout = msg.startsWith('TIMEOUT');
+    return NextResponse.json(
+      { success: false, code: timeout ? 'TIMEOUT' : 'SERVER_ERROR', message: timeout ? '조회 지연' : '서버 오류' },
+      { status: timeout ? 504 : 500 }
+    );
+  }
 }
