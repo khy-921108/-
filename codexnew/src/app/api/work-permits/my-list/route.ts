@@ -30,7 +30,7 @@ export async function POST(req: Request) {
     let q = supabase
       .from('work_permits')
       .select(
-        'id, permit_number, work_name, work_start, work_end, request_company_name, supplemental, status, created_at'
+        'id, permit_number, work_name, work_start, work_end, request_company_name, supplemental, status, created_at, issuer_signature'
       )
       .eq('applicant_name', name)
       .eq('applicant_birth_date', birthDate)
@@ -66,6 +66,7 @@ export async function POST(req: Request) {
       supplemental: p.supplemental ?? {},
       status: p.status,
       createdAt: p.created_at,
+      issued: !!(p.issuer_signature && String(p.issuer_signature).startsWith('data:image/')), // 1차 승인 여부
     }));
 
     return NextResponse.json({ success: true, data: { items } });

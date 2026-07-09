@@ -14,6 +14,7 @@ interface Item {
   supplemental: Record<string, 'Y' | 'N'>;
   status: string;
   createdAt: string;
+  issued: boolean;
 }
 
 function fmtDateTime(iso: string): string {
@@ -66,6 +67,14 @@ export default function MyWorkPermits() {
 
   const suppLabels = (s: Record<string, 'Y' | 'N'>) =>
     SUPPLEMENTAL_WORKS.filter((w) => s?.[w.key] === 'Y').map((w) => w.label);
+
+  // 현장 TBM 화면으로 이동 — 본인확인 정보를 sessionStorage로 전달(재입력 방지)
+  const goTbm = (permitId: string) => {
+    try {
+      sessionStorage.setItem('wp_tbm_cred', JSON.stringify({ name, birthDate, phone }));
+    } catch { /* */ }
+    router.push(`/work-permit/tbm/${permitId}`);
+  };
 
   return (
     <main className="space-y-6">
@@ -150,6 +159,14 @@ export default function MyWorkPermits() {
                   </div>
                   <span className="text-slate-300 text-lg shrink-0">›</span>
                 </div>
+                {it.issued && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); goTbm(it.permitId); }}
+                    className="w-full rounded-lg bg-emerald-600 text-white text-sm font-bold py-2 hover:bg-emerald-700"
+                  >
+                    🦺 현장 TBM 진행 (사진·작업자 서명)
+                  </button>
+                )}
                 <div className="flex gap-3 pt-2 border-t border-slate-100">
                   <a
                     href={`/work-permit/print/${it.permitId}`}
