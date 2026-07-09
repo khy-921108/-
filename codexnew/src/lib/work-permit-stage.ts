@@ -46,10 +46,14 @@ export function computeStage(i: StageInput): Stage {
 
   if (!isSig(i.issuerSignature)) return { key: 'WAITING', label: '대기' };
 
-  const tbmHasContent = (i.photoCount ?? 0) > 0 || (i.workerConfirmCount ?? 0) > 0;
-  if (!tbmHasContent) return { key: 'SITE_CHECK', label: '현장확인 필요' };
-
-  if (!isSig(i.witnessSignature)) return { key: 'WITNESS_WAIT', label: '2차 승인 대기' };
+  // 2차(입회) 전: TBM 완료 여부로 "현장확인 필요"(TBM 대기) vs "2차 승인 대기"(TBM 됨) 구분.
+  //  ⚠️ 2차 서명이 있으면 TBM 유무와 무관하게 다음 단계로 진행(안전환경이 경고 후 2차 직행 가능).
+  if (!isSig(i.witnessSignature)) {
+    const tbmHasContent = (i.photoCount ?? 0) > 0 || (i.workerConfirmCount ?? 0) > 0;
+    return tbmHasContent
+      ? { key: 'WITNESS_WAIT', label: '2차 승인 대기' }
+      : { key: 'SITE_CHECK', label: '현장확인 필요' };
+  }
 
   const supp = i.supplemental ?? {};
   const suppKeys = Object.keys(supp).filter((k) => supp[k] === 'Y');
