@@ -37,7 +37,8 @@ function withTimeout<T>(p: PromiseLike<T>, label: string): Promise<T> {
  *       긴급대리=SUPER 전용.
  */
 export async function PATCH(req: Request, ctx: { params: { id: string } }) {
-  const auth = await requireAdmin();
+  try {
+  const auth = await withTimeout(requireAdmin(), 'auth');
   if (!auth.ok) return auth.response;
   const actor = auth.admin.email;
   const isSuper = auth.admin.role === 'SUPER';
@@ -47,7 +48,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
 
   let body: any;
   try {
-    body = await req.json();
+    body = await withTimeout(req.json(), 'body');
   } catch {
     return NextResponse.json({ success: false, code: 'BAD_REQUEST', message: '잘못된 요청입니다.' }, { status: 400 });
   }
@@ -62,7 +63,6 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   const patchPermit = (fields: Record<string, any>) =>
     withTimeout(supabase.from('work_permits').update(fields).eq('id', ctx.params.id), 'update') as Promise<{ error: any }>;
 
-  try {
   const { data: permit, error: readErr } = await withTimeout(
     supabase
       .from('work_permits')
