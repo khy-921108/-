@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import SignaturePad from '@/components/SignaturePad';
 import { SUPPLEMENTAL_WORKS, SUPPLEMENTAL_CONFIRM_DEPT, type SupplementalKey } from '@/lib/work-permit-constants';
+import { STAGE_BADGE_CLASS, type Stage } from '@/lib/work-permit-stage';
 
 function fmtDateTime(iso?: string | null): string {
   if (!iso) return '-';
@@ -23,15 +24,9 @@ type ModalState =
   | { type: 'issue' | 'witness' | 'report' | 'confirm' }
   | { type: 'dept' | 'proxy'; supKey: SupplementalKey; label: string; dept: string };
 
-function StatusBadge({ status }: { status: string }) {
-  const m: Record<string, { l: string; c: string }> = {
-    COMPLETED: { l: '🏁 종결', c: 'bg-sky-100 text-sky-700' },
-    APPROVED: { l: '✅ 작업개시', c: 'bg-emerald-100 text-emerald-700' },
-    REJECTED: { l: '⛔ 반려', c: 'bg-red-100 text-red-700' },
-    SUBMITTED: { l: '⏳ 대기', c: 'bg-slate-100 text-slate-600' },
-  };
-  const s = m[status] ?? m.SUBMITTED;
-  return <span className={`rounded-full text-xs font-bold px-2.5 py-1 ${s.c}`}>{s.l}</span>;
+function StageBadge({ stage }: { stage?: Stage }) {
+  if (!stage) return null;
+  return <span className={`rounded-full text-xs font-bold px-2.5 py-1 ${STAGE_BADGE_CLASS[stage.key]}`}>{stage.label}</span>;
 }
 
 function TriCell({ done, started }: { done: boolean; started: boolean }) {
@@ -152,7 +147,9 @@ export default function AdminWorkPermitDetailPage() {
     if (!deptConfs[w.key]?.signature) startMissing.push(`${w.label} 별지 ${SUPPLEMENTAL_CONFIRM_DEPT[w.key]}확인`);
   });
   const canStart = startMissing.length === 0;
-  const started = data.status === 'APPROVED' || data.status === 'COMPLETED';
+  // R-6 작업개시/종료 여부 = 실제 started_at/종료확인 (status 컬럼은 포털 승인과 공유되어 신뢰 불가)
+  const started = !!data.startedAt || !!comp.confirmSignature;
+  const closed = !!comp.confirmSignature;
 
   const resetFields = () => { setSig(''); setTitle(''); setInstructions(tbm.safetyInstructions ?? ''); setReason(''); setRestoreState(comp.restoreState ?? ''); setCompletedAt(''); setModalErr(''); };
   const openModal = (m: ModalState) => { resetFields(); setModal(m); };
@@ -216,7 +213,7 @@ export default function AdminWorkPermitDetailPage() {
         <div className="flex flex-wrap items-center justify-between gap-3 mt-1">
           <div className="flex items-center gap-3">
             <span className="font-mono text-2xl sm:text-3xl font-extrabold tracking-tight text-brand whitespace-nowrap">{data.permitNumber}</span>
-            <StatusBadge status={data.status} />
+            <StageBadge stage={data.stage} />
           </div>
           <div className="flex gap-2">
             <a href={`/work-permit/print/${id}`} target="_blank" rel="noreferrer" className="btn-secondary text-sm">🖨 인쇄</a>
@@ -405,9 +402,9 @@ export default function AdminWorkPermitDetailPage() {
       <section className="card">
         <h2 className="font-bold text-slate-700 mb-1">작업완료 (종료 신고 → 확인)</h2>
         <SigRow label="종료 신고" sub="작업자/소장(대리입력)" signature={comp.workerSignature} who={comp.reportBy} at={comp.reportAt}
-          action={hasApprove && data.status !== 'COMPLETED' ? btn(reportDone ? '재신고' : '종료 신고', () => { if (reportDone && !confirm('종료신고를 다시 하면 덮어씁니다.')) return; openModal({ type: 'report' }); }) : null} />
+          action={hasApprove && !closed ? btn(reportDone ? '재신고' : '종료 신고', () => { if (reportDone && !confirm('종료신고를 다시 하면 덮어씁니다.')) return; openModal({ type: 'report' }); }) : null} />
         <SigRow label="종료 확인" sub="안전환경 최종" signature={comp.confirmSignature} who={comp.confirmBy} at={comp.confirmAt}
-          action={hasApprove && data.status !== 'COMPLETED' ? (
+          action={hasApprove && !closed ? (
             reportDone
               ? btn(confirmDone ? '재확인' : '종료 확인', () => openModal({ type: 'confirm' }))
               : <span className="text-[11px] text-slate-400">신고 후 가능</span>

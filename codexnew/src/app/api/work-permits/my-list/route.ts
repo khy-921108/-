@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { stageFromRow } from '@/lib/work-permit-stage';
 
 /**
  * POST /api/work-permits/my-list  (공개) — 신청자 본인 신청내역 조회
@@ -30,7 +31,8 @@ export async function POST(req: Request) {
     let q = supabase
       .from('work_permits')
       .select(
-        'id, permit_number, work_name, work_start, work_end, request_company_name, supplemental, status, created_at, issuer_signature'
+        `id, permit_number, work_name, work_start, work_end, request_company_name, supplemental,
+         status, created_at, issuer_signature, tbm, dept_confirmations, started_at, completion`
       )
       .eq('applicant_name', name)
       .eq('applicant_birth_date', birthDate)
@@ -65,6 +67,7 @@ export async function POST(req: Request) {
       companyName: p.request_company_name,
       supplemental: p.supplemental ?? {},
       status: p.status,
+      stage: stageFromRow(p), // R-6 진행단계(뱃지)
       createdAt: p.created_at,
       issued: !!(p.issuer_signature && String(p.issuer_signature).startsWith('data:image/')), // 1차 승인 여부
     }));

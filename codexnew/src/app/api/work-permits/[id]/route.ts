@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getDocsForOutput } from '@/lib/safety-doc-status';
+import { stageFromRow } from '@/lib/work-permit-stage';
 
 /**
  * GET /api/work-permits/:id  (공개, UUID 알아야) — 인쇄/양식용 데이터
@@ -74,6 +75,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       permitNumber: permit.permit_number,
       permitType: permit.permit_type,
       status: permit.status,
+      stage: stageFromRow(permit), // R-6 진행단계(뱃지)
       companyName: permit.request_company_name,
       info: {
         workName: permit.work_name,

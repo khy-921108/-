@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { formatDate } from '@/lib/format';
 import { SUPPLEMENTAL_WORKS } from '@/lib/work-permit-constants';
+import { STAGE_BADGE_CLASS, type Stage } from '@/lib/work-permit-stage';
 
 interface SigStatus {
   total: number;
@@ -25,26 +26,22 @@ interface Item {
   participantCount: number;
   supplemental: Record<string, 'Y' | 'N'>;
   status: string;
+  stage?: Stage;
   approvedBy?: string | null;
   approvedAt?: string | null;
   createdAt: string;
   signature?: SigStatus;
 }
 
-/** 승인 상태 뱃지: 대기(회색)/승인(초록)/반려(빨강) */
-function StatusBadge({ status, by, at }: { status: string; by?: string | null; at?: string | null }) {
-  const map: Record<string, { label: string; cls: string }> = {
-    APPROVED: { label: '✅ 승인', cls: 'bg-emerald-100 text-emerald-700' },
-    REJECTED: { label: '⛔ 반려', cls: 'bg-red-100 text-red-700' },
-    SUBMITTED: { label: '⏳ 대기', cls: 'bg-slate-100 text-slate-600' },
-  };
-  const s = map[status] ?? map.SUBMITTED;
-  const tip = (status === 'APPROVED' || status === 'REJECTED') && by
+/** R-6 진행단계 뱃지 (서버 계산 stage 기반 — status 컬럼 오염 방지) */
+function StageBadge({ stage, by, at }: { stage?: Stage; by?: string | null; at?: string | null }) {
+  if (!stage) return null;
+  const tip = (stage.key === 'STARTED' || stage.key === 'REJECTED' || stage.key === 'CLOSED') && by
     ? `${by}${at ? ' · ' + fmtDateTime(at) : ''}`
     : undefined;
   return (
-    <span title={tip} className={`rounded-full text-xs font-bold px-2 py-0.5 whitespace-nowrap ${s.cls}`}>
-      {s.label}
+    <span title={tip} className={`rounded-full text-xs font-bold px-2 py-0.5 whitespace-nowrap ${STAGE_BADGE_CLASS[stage.key]}`}>
+      {stage.label}
     </span>
   );
 }
@@ -183,7 +180,7 @@ export default function AdminWorkPermitsPage() {
                   <p className="text-xs text-slate-400 mt-0.5">신청일 {formatDate(it.createdAt)}</p>
                 </div>
                 <div className="flex flex-col items-end gap-1 shrink-0">
-                  <StatusBadge status={it.status} by={it.approvedBy} at={it.approvedAt} />
+                  <StageBadge stage={it.stage} by={it.approvedBy} at={it.approvedAt} />
                   {sig && sig.total > 0 && (
                     sig.unsigned === 0 ? (
                       <span className="rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-0.5 whitespace-nowrap">

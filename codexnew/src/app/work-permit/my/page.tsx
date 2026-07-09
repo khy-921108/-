@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { SUPPLEMENTAL_WORKS } from '@/lib/work-permit-constants';
+import { STAGE_BADGE_CLASS, type Stage } from '@/lib/work-permit-stage';
 
 interface Item {
   permitId: string;
@@ -13,6 +14,7 @@ interface Item {
   companyName: string;
   supplemental: Record<string, 'Y' | 'N'>;
   status: string;
+  stage?: Stage;
   createdAt: string;
   issued: boolean;
 }
@@ -149,7 +151,10 @@ export default function MyWorkPermits() {
               >
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="font-mono text-sm font-bold text-brand">{it.permitNumber}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-mono text-sm font-bold text-brand">{it.permitNumber}</p>
+                      {it.stage && <span className={`rounded-full text-[11px] font-bold px-2 py-0.5 ${STAGE_BADGE_CLASS[it.stage.key]}`}>{it.stage.label}</span>}
+                    </div>
                     <p className="font-bold text-slate-800 mt-0.5 hover:underline">{it.workName}</p>
                     <p className="text-xs text-slate-500 mt-0.5">{it.companyName}</p>
                     <p className="text-xs text-slate-600 mt-0.5">📅 {fmtDateTime(it.workStart)} ~ {fmtDateTime(it.workEnd)}</p>
