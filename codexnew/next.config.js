@@ -13,6 +13,9 @@ const nextConfig = {
     outputFileTracingIncludes: {
       '/api/work-permits/[id]/xlsx': ['./src/lib/templates/**'],
     },
+    // @napi-rs/canvas(네이티브 .node)를 webpack 번들 대신 node_modules에서 로드 → Vercel 런타임 로드 가능
+    // (미설정 시 서버리스에서 모듈 로드 실패 → 서명 로그 fail-safe 생략됨. ③-4 버그2)
+    serverComponentsExternalPackages: ['@napi-rs/canvas'],
   },
   images: {
     remotePatterns: [

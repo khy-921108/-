@@ -60,8 +60,16 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   }
 
   const supabase = createServiceClient();
-  const patchPermit = (fields: Record<string, any>) =>
-    withTimeout(supabase.from('work_permits').update(fields).eq('id', ctx.params.id), 'update') as Promise<{ error: any }>;
+  // 저장 후 실제 반영 검증: .select() 로 갱신된 행을 돌려받아 0행이면 실패 처리(조용한 미저장 방지).
+  const patchPermit = async (fields: Record<string, any>): Promise<{ error: any }> => {
+    const { data, error } = (await withTimeout(
+      supabase.from('work_permits').update(fields).eq('id', ctx.params.id).select('id'),
+      'update'
+    )) as { data: any[] | null; error: any };
+    if (error) return { error };
+    if (!data || data.length === 0) return { error: { message: 'NO_ROW_UPDATED' } };
+    return { error: null };
+  };
 
   const { data: permit, error: readErr } = await withTimeout(
     supabase
