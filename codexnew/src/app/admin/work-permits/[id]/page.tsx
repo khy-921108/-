@@ -87,11 +87,17 @@ export default function AdminWorkPermitDetailPage() {
   const [modalErr, setModalErr] = useState('');
 
   const load = useCallback(async () => {
+    // 읽기(조회)에 15초 클라 타임아웃 — Supabase 지연 시 화면이 매달리지 않게
+    const tf = (url: string) => {
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), 15000);
+      return fetch(url, { cache: 'no-store', signal: ac.signal }).finally(() => clearTimeout(t));
+    };
     try {
       const [pRes, mRes, phRes] = await Promise.all([
-        fetch(`/api/work-permits/${id}`, { cache: 'no-store' }),
-        fetch(`/api/admin/me`, { cache: 'no-store' }),
-        fetch(`/api/admin/work-permits/${id}/tbm-photos`, { cache: 'no-store' }),
+        tf(`/api/work-permits/${id}`),
+        tf(`/api/admin/me`),
+        tf(`/api/admin/work-permits/${id}/tbm-photos`),
       ]);
       const pJson = await pRes.json();
       if (pJson.success) setData(pJson.data);
@@ -175,16 +181,19 @@ export default function AdminWorkPermitDetailPage() {
       else if (modal.type === 'proxy') { b.action = 'dept_proxy'; b.supKey = modal.supKey; b.reason = reason.trim(); }
       else if (modal.type === 'report') { b.action = 'complete_report'; b.restoreState = restoreState.trim(); if (completedAt) b.completedAt = new Date(completedAt).toISOString(); }
       else if (modal.type === 'confirm') { b.action = 'complete_confirm'; }
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), 20000);
       const res = await fetch(`/api/admin/work-permits/${id}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b),
-      });
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b), signal: ac.signal,
+      }).finally(() => clearTimeout(t));
       const json = await res.json();
       if (!json.success) { setModalErr(json.message || '저장 실패'); setSaving(false); return; }
+      // 저장 성공 → 즉시 UI 해제(모달 닫기). 화면 갱신은 백그라운드(느려도 안 매달림)
       setModal(null);
-      await load();
+      setSaving(false);
+      load();
     } catch {
-      setModalErr('네트워크 오류');
-    } finally {
+      setModalErr('저장 지연 또는 네트워크 오류입니다. 잠시 후 다시 시도해 주세요.');
       setSaving(false);
     }
   };
@@ -192,13 +201,15 @@ export default function AdminWorkPermitDetailPage() {
   const startWork = async () => {
     setBanner('');
     try {
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), 20000);
       const res = await fetch(`/api/admin/work-permits/${id}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'start_work' }),
-      });
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'start_work' }), signal: ac.signal,
+      }).finally(() => clearTimeout(t));
       const json = await res.json();
       if (!json.success) { setBanner(`⛔ ${json.message}`); return; }
-      await load();
-    } catch { setBanner('네트워크 오류'); }
+      load();
+    } catch { setBanner('저장 지연 또는 네트워크 오류입니다. 잠시 후 다시 시도해 주세요.'); }
   };
 
   const btn = (label: string, on: () => void, kind: 'primary' | 'warn' = 'primary') => (

@@ -35,14 +35,9 @@ export default function WorkPermitInfo() {
     confined: false, height: false, electric: false, excavation: false,
     hot: false, heavy: false, radiation: false,
   });
-  // R-6: 승인자(요청부서 현장책임자) + TBM 상세
-  const [approverTitle, setApproverTitle] = useState('');
-  const [approverName, setApproverName] = useState('');
-  const [approvalMode, setApprovalMode] = useState<'SITE' | 'REMOTE'>('SITE');
+  // R-6 ③-3: 승인자·승인방식·안전관리자 입력 제거(신청인 권한 아님). TBM 위험요인·안전대책만 유지.
   const [riskText, setRiskText] = useState('');
   const [measureText, setMeasureText] = useState('');
-  const [safetyManager, setSafetyManager] = useState('');
-  const [smAffiliation, setSmAffiliation] = useState<'INTERNAL' | 'CONTRACTOR'>('INTERNAL');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -70,16 +65,9 @@ export default function WorkPermitInfo() {
         return next;
       });
     }
-    if (d.approval) {
-      setApproverTitle(d.approval.approverTitle ?? '');
-      setApproverName(d.approval.approverName ?? '');
-      setApprovalMode(d.approval.approvalMode ?? 'SITE');
-    }
     if (d.tbmDetail) {
       setRiskText((d.tbmDetail.riskFactors ?? []).join('\n'));
       setMeasureText((d.tbmDetail.safetyMeasures ?? []).join('\n'));
-      setSafetyManager(d.tbmDetail.safetyManagerName ?? '');
-      setSmAffiliation(d.tbmDetail.safetyManagerAffiliation ?? 'INTERNAL');
     }
   }, [router]);
 
@@ -115,18 +103,12 @@ export default function WorkPermitInfo() {
         applicantTitle: applicantTitle.trim(),
       },
       supplemental,
-      // R-6: 승인자(요청부서 현장책임자) + TBM 상세
-      approval: {
-        approverTitle: approverTitle.trim(),
-        approverName: approverName.trim(),
-        approvalMode,
-      },
+      // R-6 ③-3: 승인자/승인방식/안전관리자는 신청인이 입력하지 않음(담당자·안전환경이 처리) → 비움
+      approval: {},
       tbmDetail: {
         workContent: workContent.trim(),
         riskFactors: splitLines(riskText),
         safetyMeasures: splitLines(measureText),
-        safetyManagerName: safetyManager.trim(),
-        safetyManagerAffiliation: smAffiliation,
       },
       // 작업일시가 바뀌면 기존 참여자 유효성 재확인 필요 → 비움
       participants: [],
@@ -175,39 +157,13 @@ export default function WorkPermitInfo() {
           <textarea className="input-base min-h-[90px]" value={workContent} onChange={(e) => setWorkContent(e.target.value)} placeholder="작업 내용을 간단히 적어주세요." />
         </div>
 
-        <div className="rounded-xl border-2 border-slate-200 bg-slate-50/60 p-3 space-y-3">
-          <p className="text-sm font-bold text-slate-700">승인 정보</p>
-          <p className="text-xs text-slate-500 -mt-1">
-            승인자는 <b>안전환경담당이 아니라 작업을 요청·관할하는 부서의 현장 책임자(차장/대리)</b>입니다.
-            안전환경담당은 검토·발급만 합니다.
+        <div className="rounded-xl border-2 border-emerald-100 bg-emerald-50/60 p-3">
+          <p className="text-sm font-bold text-slate-700">담당</p>
+          <p className="mt-1 text-sm text-slate-700">안전환경 <b>김형준 대리</b></p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            이 신청은 안전환경 담당자가 검토·발급하고, 현장확인·승인은 담당자가 진행합니다.
+            (승인자·승인방식은 신청인이 입력하지 않습니다.)
           </p>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="label">승인자 직책</label>
-              <input className="input-base" value={approverTitle} onChange={(e) => setApproverTitle(e.target.value)} placeholder="예: 정비부서 차장" />
-            </div>
-            <div>
-              <label className="label">승인자 성명</label>
-              <input className="input-base" value={approverName} onChange={(e) => setApproverName(e.target.value)} placeholder="예: 김현장" />
-            </div>
-          </div>
-          <div>
-            <label className="label">승인 방식</label>
-            <div className="grid grid-cols-2 gap-2">
-              {([['SITE', '현장 승인'], ['REMOTE', '원격 승인']] as const).map(([v, lbl]) => (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => setApprovalMode(v)}
-                  className={`rounded-xl border-2 py-2 text-sm font-bold transition ${
-                    approvalMode === v ? 'border-brand bg-brand/5 text-brand' : 'border-slate-200 bg-white text-slate-600'
-                  }`}
-                >
-                  {approvalMode === v ? '●' : '○'} {lbl}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         <div className="rounded-xl border-2 border-slate-200 bg-slate-50/60 p-3 space-y-3">
@@ -220,29 +176,6 @@ export default function WorkPermitInfo() {
             <label className="label">안전 대책 (한 줄에 하나씩, 최대 6개)</label>
             <textarea className="input-base min-h-[70px]" value={measureText} onChange={(e) => setMeasureText(e.target.value)} placeholder={'예: 안전대 착용\n신호수 배치'} />
           </div>
-          <div>
-            <label className="label">안전관리자 성명 (선택 — TBM 확인·결재자)</label>
-            <input className="input-base" value={safetyManager} onChange={(e) => setSafetyManager(e.target.value)} placeholder="예: 이관리" />
-          </div>
-          {safetyManager.trim() && (
-            <div>
-              <label className="label">안전관리자 소속</label>
-              <div className="grid grid-cols-2 gap-2">
-                {([['INTERNAL', '사내 (동남)'], ['CONTRACTOR', '작업업체']] as const).map(([v, lbl]) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setSmAffiliation(v)}
-                    className={`rounded-xl border-2 py-2 text-sm font-bold transition ${
-                      smAffiliation === v ? 'border-brand bg-brand/5 text-brand' : 'border-slate-200 bg-white text-slate-600'
-                    }`}
-                  >
-                    {smAffiliation === v ? '●' : '○'} {lbl}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         <div>
