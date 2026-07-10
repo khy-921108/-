@@ -62,6 +62,8 @@ export interface WpDraft {
   };
   /** TBM 현장 사진(PNG/JPEG data URL, 최대 4장) */
   photos?: string[];
+  /** 복사 재신청으로 만든 초안 — 제출 화면에서 "오늘 조건 확인" 필수 체크 요구 */
+  copied?: boolean;
 }
 
 const KEY = 'wpDraft';

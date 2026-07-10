@@ -73,6 +73,19 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+    // 매일발급 A안: 허가서는 하루 단위만 — 시작·종료 날짜(KST)가 다르면 거부.
+    //  (기존 기간 허가서는 과거 기록으로 유지, 새 신청부터 적용)
+    const kstDate = (iso: string) => {
+      const k = new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000);
+      const p = (n: number) => String(n).padStart(2, '0');
+      return `${k.getUTCFullYear()}-${p(k.getUTCMonth() + 1)}-${p(k.getUTCDate())}`;
+    };
+    if (kstDate(workStart) !== kstDate(workEnd)) {
+      return NextResponse.json(
+        { success: false, code: 'INVALID_PERIOD', message: '작업허가는 하루 단위만 신청할 수 있습니다. 작업 시작·종료 날짜가 같아야 합니다.' },
+        { status: 400 }
+      );
+    }
     if (participantsIn.length === 0) {
       return NextResponse.json(
         { success: false, code: 'NO_PARTICIPANT', message: '참여자를 최소 1명 추가해 주세요.' },

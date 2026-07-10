@@ -20,6 +20,7 @@ export default function WorkPermitConfirm() {
   const [error, setError] = useState('');
   // R-6 ③-3: 신청 단계는 신청인 서명만. 안전관리자 서명·TBM 사진은 제거(사진은 현장 TBM 화면 ③-6에서).
   const [applicantSig, setApplicantSig] = useState('');
+  const [confirmedToday, setConfirmedToday] = useState(false); // 복사 재신청 시 오늘 조건 확인
 
   useEffect(() => {
     const d = readDraft();
@@ -34,6 +35,10 @@ export default function WorkPermitConfirm() {
 
   const submit = async () => {
     setError('');
+    if (draft.copied && !confirmedToday) {
+      setError('복사 재신청은 오늘의 작업조건·위험요인 확인 체크가 필요합니다.');
+      return;
+    }
     setSubmitting(true);
     try {
       const res = await fetch('/api/work-permits', {
@@ -124,11 +129,26 @@ export default function WorkPermitConfirm() {
         </p>
       </div>
 
+      {draft.copied && (
+        <label className="card flex items-start gap-3 cursor-pointer border-2 border-amber-200 bg-amber-50/60">
+          <input
+            type="checkbox"
+            checked={confirmedToday}
+            onChange={(e) => setConfirmedToday(e.target.checked)}
+            className="mt-0.5 h-5 w-5 shrink-0"
+          />
+          <span className="text-sm text-slate-700">
+            <b>오늘의 작업조건·위험요인을 확인했습니다.</b><br />
+            <span className="text-xs text-slate-500">이전 허가서 내용을 복사한 신청입니다. 오늘 현장의 가스·날씨·지반 등 조건이 다를 수 있어 반드시 재확인이 필요합니다.</span>
+          </span>
+        </label>
+      )}
+
       {error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
       <div className="flex gap-2">
         <button type="button" onClick={() => router.push('/work-permit/docs')} className="btn-secondary">이전</button>
-        <button type="button" onClick={submit} disabled={submitting} className="btn-primary">
+        <button type="button" onClick={submit} disabled={submitting || (draft.copied && !confirmedToday)} className="btn-primary">
           {submitting ? '제출 중...' : '신청 제출'}
         </button>
       </div>

@@ -50,7 +50,8 @@ export async function POST(req: Request) {
       .from('work_permits')
       .select(
         `id, permit_number, work_name, work_start, work_end, request_company_name, supplemental,
-         status, created_at, issuer_signature, started_at`
+         status, created_at, issuer_signature, started_at,
+         work_location, equipment_no, work_content, applicant_title, request_company_id, tbm`
       )
       .eq('applicant_name', name)
       .eq('applicant_birth_date', birthDate)
@@ -81,6 +82,19 @@ export async function POST(req: Request) {
       stage: stageFromLightRow(p, nowMs), // R-6 진행단계(목록 경량뱃지, 미종료 판정 포함)
       createdAt: p.created_at,
       issued: !!(p.issuer_signature && String(p.issuer_signature).startsWith('data:image/')), // 1차 승인 여부
+      // 복사 재신청용 원본 내용(본인확인 통과자 본인 것만). 날짜·서명·참여자·TBM 확인은 제외.
+      copy: {
+        companyId: p.request_company_id ?? null,
+        companyName: p.request_company_name ?? null,
+        workName: p.work_name ?? '',
+        workLocation: p.work_location ?? '',
+        equipmentNo: p.equipment_no ?? '',
+        applicantTitle: p.applicant_title ?? '',
+        workContent: p.work_content ?? '',
+        supplemental: p.supplemental ?? {},
+        riskFactors: Array.isArray((p.tbm ?? {}).riskFactors) ? (p.tbm as any).riskFactors : [],
+        safetyMeasures: Array.isArray((p.tbm ?? {}).safetyMeasures) ? (p.tbm as any).safetyMeasures : [],
+      },
     }));
 
     return NextResponse.json({ success: true, data: { items, month, minMonth, maxMonth } });

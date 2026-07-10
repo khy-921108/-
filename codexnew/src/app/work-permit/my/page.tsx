@@ -4,6 +4,20 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { SUPPLEMENTAL_WORKS } from '@/lib/work-permit-constants';
 import { STAGE_BADGE_CLASS, type Stage } from '@/lib/work-permit-stage';
+import { writeDraft, clearDraft } from '@/lib/work-permit-draft';
+
+interface CopySource {
+  companyId: string | null;
+  companyName: string | null;
+  workName: string;
+  workLocation: string;
+  equipmentNo: string;
+  applicantTitle: string;
+  workContent: string;
+  supplemental: Record<string, 'Y' | 'N'>;
+  riskFactors: string[];
+  safetyMeasures: string[];
+}
 
 interface Item {
   permitId: string;
@@ -17,6 +31,7 @@ interface Item {
   stage?: Stage;
   createdAt: string;
   issued: boolean;
+  copy?: CopySource;
 }
 
 function fmtDateTime(iso: string): string {
@@ -90,6 +105,33 @@ export default function MyWorkPermits() {
 
   const suppLabels = (s: Record<string, 'Y' | 'N'>) =>
     SUPPLEMENTAL_WORKS.filter((w) => s?.[w.key] === 'Y').map((w) => w.label);
+
+  // 같은 내용으로 재신청 — 내용만 복사(날짜·서명·승인·TBM·참여자 제외), 오늘 날짜로 새로 신청.
+  const reapply = (it: Item) => {
+    const c = it.copy;
+    if (!c || !c.companyId) { alert('이 허가서는 복사 재신청을 지원하지 않습니다.'); return; }
+    clearDraft();
+    writeDraft({
+      applicant: { name: name.trim(), birthDate, phone, companyId: c.companyId },
+      company: { id: c.companyId, name: c.companyName ?? '' },
+      info: {
+        workName: c.workName,
+        workLocation: c.workLocation,
+        equipmentNo: c.equipmentNo,
+        workStart: '', // 🔴 작업일·시간은 복사하지 않음(오늘 날짜로 새로 입력)
+        workEnd: '',
+        workContent: c.workContent,
+        applicantName: name.trim(),
+        applicantTitle: c.applicantTitle,
+      },
+      supplemental: c.supplemental ?? {},
+      tbmDetail: { workContent: c.workContent, riskFactors: c.riskFactors ?? [], safetyMeasures: c.safetyMeasures ?? [] },
+      approval: {},
+      participants: [], // 🔴 참여자·확인은 복사하지 않음(재입력)
+      copied: true,
+    });
+    router.push('/work-permit/info');
+  };
 
   // 현장 TBM 화면으로 이동 — 본인확인 정보를 sessionStorage로 전달(재입력 방지)
   const goTbm = (permitId: string) => {
@@ -202,7 +244,7 @@ export default function MyWorkPermits() {
                     🦺 현장 TBM 진행 (사진·작업자 서명)
                   </button>
                 )}
-                <div className="flex gap-3 pt-2 border-t border-slate-100">
+                <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
                   <a
                     href={`/work-permit/print/${it.permitId}`}
                     onClick={(e) => e.stopPropagation()}
@@ -217,6 +259,14 @@ export default function MyWorkPermits() {
                   >
                     📥 양식 .xlsx
                   </a>
+                  {it.copy?.companyId && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); reapply(it); }}
+                      className="ml-auto text-xs font-bold text-emerald-700 hover:underline"
+                    >
+                      📄 같은 내용으로 재신청
+                    </button>
+                  )}
                 </div>
               </div>
             );

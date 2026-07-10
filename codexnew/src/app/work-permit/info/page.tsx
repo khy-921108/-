@@ -28,8 +28,9 @@ export default function WorkPermitInfo() {
   const [workName, setWorkName] = useState('');
   const [workLocation, setWorkLocation] = useState('');
   const [equipmentNo, setEquipmentNo] = useState('');
-  const [workStart, setWorkStart] = useState('');
-  const [workEnd, setWorkEnd] = useState('');
+  const [workDate, setWorkDate] = useState('');   // 작업일(하루)
+  const [startTime, setStartTime] = useState(''); // 시작 시간 HH:mm
+  const [endTime, setEndTime] = useState('');     // 종료 시간 HH:mm
   const [workContent, setWorkContent] = useState('');
   const [supp, setSupp] = useState<Record<SupplementalKey, boolean>>({
     confined: false, height: false, electric: false, excavation: false,
@@ -52,8 +53,11 @@ export default function WorkPermitInfo() {
       setWorkName(d.info.workName ?? '');
       setWorkLocation(d.info.workLocation ?? '');
       setEquipmentNo(d.info.equipmentNo ?? '');
-      setWorkStart(d.info.workStart ? fromKstIso(d.info.workStart) : '');
-      setWorkEnd(d.info.workEnd ? fromKstIso(d.info.workEnd) : '');
+      if (d.info.workStart) {
+        const [dt, tm] = fromKstIso(d.info.workStart).split('T');
+        setWorkDate(dt); setStartTime(tm);
+      }
+      if (d.info.workEnd) setEndTime(fromKstIso(d.info.workEnd).split('T')[1] ?? '');
       setWorkContent(d.info.workContent ?? '');
     }
     if (d.supplemental) {
@@ -71,17 +75,19 @@ export default function WorkPermitInfo() {
     }
   }, [router]);
 
-  const periodValid =
-    workStart && workEnd && new Date(toKstIso(workStart)).getTime() < new Date(toKstIso(workEnd)).getTime();
+  // 하루 단위: 같은 날짜 안에서 시작 < 종료 (문자 "HH:mm" 비교로 충분)
+  const periodValid = !!(workDate && startTime && endTime && startTime < endTime);
 
-  const canNext =
-    workName.trim() && workLocation.trim() && workContent.trim() && workStart && workEnd && periodValid;
+  const canNext = !!(
+    workName.trim() && workLocation.trim() && workContent.trim() &&
+    workDate && startTime && endTime && periodValid
+  );
 
   const goNext = () => {
     setError('');
     if (!canNext) {
-      if (workStart && workEnd && !periodValid) {
-        setError('작업 종료일시가 시작일시보다 빠를 수 없습니다.');
+      if (workDate && startTime && endTime && !periodValid) {
+        setError('작업 종료시간이 시작시간보다 빠를 수 없습니다.');
       } else {
         setError('필수 작업정보를 모두 입력해 주세요.');
       }
@@ -96,8 +102,8 @@ export default function WorkPermitInfo() {
         workName: workName.trim(),
         workLocation: workLocation.trim(),
         equipmentNo: equipmentNo.trim(),
-        workStart: toKstIso(workStart),
-        workEnd: toKstIso(workEnd),
+        workStart: toKstIso(`${workDate}T${startTime}`),
+        workEnd: toKstIso(`${workDate}T${endTime}`),
         workContent: workContent.trim(),
         applicantName,
         applicantTitle: applicantTitle.trim(),
@@ -137,15 +143,21 @@ export default function WorkPermitInfo() {
           <label className="label">장치번호 / 장치명 (선택)</label>
           <input className="input-base" value={equipmentNo} onChange={(e) => setEquipmentNo(e.target.value)} placeholder="예: P-101 / 냉각펌프" />
         </div>
-        <div className="grid grid-cols-1 gap-3">
+        <div className="space-y-3">
           <div>
-            <label className="label">작업 시작일시</label>
-            <input type="datetime-local" className="input-base" value={workStart} onChange={(e) => setWorkStart(e.target.value)} />
+            <label className="label">작업일 (하루)</label>
+            <input type="date" className="input-base" value={workDate} onChange={(e) => setWorkDate(e.target.value)} />
+            <p className="mt-1 text-xs text-slate-500">※ 작업허가는 <b>하루 단위</b>입니다. 여러 날 작업은 <b>작업하는 날마다</b> 다시 신청해 주세요.</p>
           </div>
-          <div>
-            <label className="label">작업 종료일시</label>
-            <input type="datetime-local" className="input-base" value={workEnd} onChange={(e) => setWorkEnd(e.target.value)} />
-            <p className="mt-1 text-xs text-slate-500">※ 참여자 교육 유효성은 <b>작업 종료일</b> 기준으로 판정됩니다.</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">시작 시간</label>
+              <input type="time" className="input-base" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">종료 시간</label>
+              <input type="time" className="input-base" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+            </div>
           </div>
         </div>
         <div>
