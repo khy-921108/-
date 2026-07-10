@@ -26,20 +26,31 @@ function fmtDateTime(iso: string): string {
   return `${k.getUTCFullYear()}.${p(k.getUTCMonth() + 1)}.${p(k.getUTCDate())} ${p(k.getUTCHours())}:${p(k.getUTCMinutes())}`;
 }
 
+const PAGE_SIZE = 5;
+
 export default function MyWorkPermits() {
   const router = useRouter();
+
+  // 조회 월 (YYYY-MM) — 기본=이번 달, ◀ 6개월 전까지 / ▶ 다음 달까지
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const ymOf = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+  const thisMonth = ymOf(new Date());
+  const minMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 6); return ymOf(d); })();
+  const maxMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + 1); return ymOf(d); })();
+  const shiftMonth = (ym: string, delta: number) => { const [y, m] = ym.split('-').map(Number); return ymOf(new Date(y, m - 1 + delta, 1)); };
+
   const [name, setName] = useState('');
   const [birthDate, setBirthDate] = useState('');
   const [phone, setPhone] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [month, setMonth] = useState(thisMonth);
   const [items, setItems] = useState<Item[] | null>(null);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const formatPhone = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 11);
 
-  const search = async () => {
+  const search = async (m = month) => {
     setError('');
     if (!name.trim() || !birthDate || phone.length < 10) {
       setError('이름·생년월일·연락처를 정확히 입력해 주세요.');
@@ -50,7 +61,7 @@ export default function MyWorkPermits() {
       const res = await fetch('/api/work-permits/my-list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, birthDate, phone, dateFrom, dateTo }),
+        body: JSON.stringify({ name, birthDate, phone, month: m }),
       });
       const json = await res.json();
       if (!json.success) {
@@ -59,12 +70,22 @@ export default function MyWorkPermits() {
         return;
       }
       setItems(json.data.items);
+      setPage(1);
     } catch (e) {
       console.error(e);
       setError('네트워크 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
+  };
+
+  // 월 이동 — 이미 조회한 상태면 새 달로 자동 재조회
+  const changeMonth = (delta: number) => {
+    const nm = shiftMonth(month, delta);
+    if (nm < minMonth || nm > maxMonth) return;
+    setMonth(nm);
+    setPage(1);
+    if (items !== null) search(nm);
   };
 
   const suppLabels = (s: Record<string, 'Y' | 'N'>) =>
@@ -77,6 +98,11 @@ export default function MyWorkPermits() {
     } catch { /* */ }
     router.push(`/work-permit/tbm/${permitId}`);
   };
+
+  const [my, mm] = month.split('-');
+  const totalPages = Math.max(1, Math.ceil((items?.length ?? 0) / PAGE_SIZE));
+  const curPage = Math.min(page, totalPages);
+  const visible = (items ?? []).slice((curPage - 1) * PAGE_SIZE, curPage * PAGE_SIZE);
 
   return (
     <main className="space-y-6">
@@ -107,36 +133,40 @@ export default function MyWorkPermits() {
             placeholder="01012345678"
           />
         </div>
+
+        {/* 조회 월 선택기 (◀ 6개월 전 ~ ▶ 다음 달) */}
         <div>
-          <label className="label">작업예정일 범위 (선택)</label>
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="date"
-              className="input-base"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              aria-label="작업예정일 시작"
-            />
-            <input
-              type="date"
-              className="input-base"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              aria-label="작업예정일 종료"
-            />
+          <label className="label">조회 월</label>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={() => changeMonth(-1)}
+              disabled={month <= minMonth}
+              className="h-9 w-9 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-30 text-lg leading-none"
+              aria-label="이전 달"
+            >◀</button>
+            <span className="text-base font-bold text-slate-800 w-32 text-center">{my}년 {Number(mm)}월</span>
+            <button
+              onClick={() => changeMonth(1)}
+              disabled={month >= maxMonth}
+              className="h-9 w-9 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-30 text-lg leading-none"
+              aria-label="다음 달"
+            >▶</button>
           </div>
-          <p className="mt-1 text-xs text-slate-500">※ 비워두면 전체 기간 조회</p>
+          <p className="mt-1 text-xs text-slate-500 text-center">※ 선택한 달에 작업예정인 허가서를 조회 (최근 6개월 ~ 다음 달)</p>
         </div>
+
         {error && <div className="rounded-lg bg-red-50 p-2 text-sm text-red-700">{error}</div>}
-        <button onClick={search} disabled={loading} className="btn-primary">
+        <button onClick={() => search(month)} disabled={loading} className="btn-primary">
           {loading ? '조회 중...' : '조회'}
         </button>
       </div>
 
       {items !== null && (
         <div className="space-y-2">
-          <p className="text-xs text-slate-500">총 {items.length}건 · 카드를 누르면 상세/인쇄</p>
-          {items.map((it) => {
+          <p className="text-sm font-semibold text-slate-700">
+            {my}년 {Number(mm)}월 · 총 {items.length}건
+          </p>
+          {visible.map((it) => {
             const supp = suppLabels(it.supplemental);
             return (
               <div
@@ -193,8 +223,19 @@ export default function MyWorkPermits() {
           })}
           {items.length === 0 && (
             <div className="card text-center text-slate-500 py-8">
-              조회된 신청내역이 없습니다.<br />
-              <span className="text-xs">신청 시 입력한 이름·생년월일·연락처와 동일해야 조회됩니다.</span>
+              {my}년 {Number(mm)}월에 조회된 신청내역이 없습니다.<br />
+              <span className="text-xs">다른 달을 선택하거나, 신청 시 입력한 이름·생년월일·연락처와 동일한지 확인해 주세요.</span>
+            </div>
+          )}
+
+          {/* 페이지네이션 (5개씩) */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={curPage <= 1}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm text-slate-600 disabled:opacity-30">이전</button>
+              <span className="text-sm font-semibold text-slate-700">{curPage} / {totalPages}</span>
+              <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={curPage >= totalPages}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm text-slate-600 disabled:opacity-30">다음</button>
             </div>
           )}
         </div>

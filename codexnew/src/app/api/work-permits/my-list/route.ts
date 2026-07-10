@@ -3,12 +3,13 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { stageFromLightRow } from '@/lib/work-permit-stage';
 
 /**
- * POST /api/work-permits/my-list  (공개) — 신청자 본인 신청내역 조회
- * req: { name, phone }
- * res: { success, data:{ items:[{permitId,permitNumber,workName,workStart,workEnd,
- *                                companyName,supplemental,status,createdAt}] } }
+ * POST /api/work-permits/my-list  (공개) — 신청자 본인 신청내역 조회 (월 단위)
+ * req: { name, birthDate, phone, month:'YYYY-MM' }
+ * res: { success, data:{ items:[...], month, minMonth, maxMonth } }
  *
- * - 본인(applicant_name + applicant_phone) 일치 건만 반환. 타인 명단 덤프 없음.
+ * - 본인(applicant_name + birth_date + phone) 일치 건만 반환. 타인 명단 덤프 없음.
+ * - 조회 월과 작업기간(work_start~work_end)이 겹치는 건(월 경계 걸침 포함).
+ * - 🔴 조회 범위 = 6개월 전 ~ 다음 달. 범위 밖 요청은 서버에서 클램프(프론트 우회 방지).
  * - 인쇄/양식은 permitId(UUID)로 접근(기존 모델과 동일).
  */
 export async function POST(req: Request) {
@@ -17,8 +18,7 @@ export async function POST(req: Request) {
     const name = (typeof body.name === 'string' ? body.name : '').trim();
     const birthDate = (typeof body.birthDate === 'string' ? body.birthDate : '').trim();
     const phone = (typeof body.phone === 'string' ? body.phone : '').replace(/[^0-9]/g, '');
-    const dateFrom = (typeof body.dateFrom === 'string' ? body.dateFrom : '').trim();
-    const dateTo = (typeof body.dateTo === 'string' ? body.dateTo : '').trim();
+    const monthRaw = (typeof body.month === 'string' ? body.month : '').trim();
 
     if (!name || !birthDate || phone.length < 10) {
       return NextResponse.json(
@@ -27,8 +27,26 @@ export async function POST(req: Request) {
       );
     }
 
+    // 허용 조회 범위(KST): 6개월 전 ~ 다음 달. 잘못된/범위 밖 month 는 클램프.
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const ym = (offset: number) => {
+      const d = new Date(Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth() + offset, 1));
+      return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}`;
+    };
+    const thisMonth = ym(0), minMonth = ym(-6), maxMonth = ym(1);
+    let month = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : thisMonth;
+    if (month < minMonth) month = minMonth;
+    if (month > maxMonth) month = maxMonth;
+
+    // 월 겹침 조건: work_start ≤ 월말 AND work_end ≥ 월초 (관리자 목록과 동일 패턴)
+    const [y, m] = month.split('-').map(Number);
+    const lastDay = new Date(y, m, 0).getDate();
+    const monthStart = `${month}-01T00:00:00+09:00`;
+    const monthEnd = `${month}-${pad(lastDay)}T23:59:59+09:00`;
+
     const supabase = createServiceClient();
-    let q = supabase
+    const { data: permits, error } = await supabase
       .from('work_permits')
       .select(
         `id, permit_number, work_name, work_start, work_end, request_company_name, supplemental,
@@ -37,18 +55,10 @@ export async function POST(req: Request) {
       .eq('applicant_name', name)
       .eq('applicant_birth_date', birthDate)
       .eq('applicant_phone', phone)
+      .lte('work_start', monthEnd)
+      .gte('work_end', monthStart)
       .order('work_start', { ascending: false })
       .limit(200);
-
-    // 작업예정일(work_start) 범위 필터 — KST 기준 일자
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) {
-      q = q.gte('work_start', `${dateFrom}T00:00:00+09:00`);
-    }
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
-      q = q.lte('work_start', `${dateTo}T23:59:59+09:00`);
-    }
-
-    const { data: permits, error } = await q;
 
     if (error) {
       console.error('[work-permits/my-list] error:', error);
@@ -72,7 +82,7 @@ export async function POST(req: Request) {
       issued: !!(p.issuer_signature && String(p.issuer_signature).startsWith('data:image/')), // 1차 승인 여부
     }));
 
-    return NextResponse.json({ success: true, data: { items } });
+    return NextResponse.json({ success: true, data: { items, month, minMonth, maxMonth } });
   } catch (e) {
     console.error('[work-permits/my-list] unexpected:', e);
     return NextResponse.json(
