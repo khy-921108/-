@@ -55,20 +55,26 @@ function fmtDateTime(iso: string): string {
 
 export default function AdminWorkPermitsPage() {
   const router = useRouter();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const ymOf = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+  const thisMonth = ymOf(new Date());
+  const maxMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + 1); return ymOf(d); })(); // 다음 달까지
+  const shiftMonth = (ym: string, delta: number) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + delta, 1); return ymOf(d); };
+  const PAGE_SIZE = 10;
+
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [month, setMonth] = useState(thisMonth);
   const [unsignedOnly, setUnsignedOnly] = useState(false);
+  const [page, setPage] = useState(1);
 
-  const load = async () => {
+  const load = async (m = month, kw = keyword) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (keyword) params.set('keyword', keyword);
-      if (dateFrom) params.set('dateFrom', dateFrom);
-      if (dateTo) params.set('dateTo', dateTo);
+      if (kw) params.set('keyword', kw);
+      if (m) params.set('month', m);
       const res = await fetch(`/api/admin/work-permits?${params.toString()}`);
       const json = await res.json();
       if (json.success) setItems(json.data.items);
@@ -78,10 +84,12 @@ export default function AdminWorkPermitsPage() {
     }
   };
 
+  // 진입/월 변경 시 자동 조회 (조회 버튼 없이)
   useEffect(() => {
-    load();
+    setPage(1);
+    load(month, keyword);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [month]);
 
   const suppLabels = (s: Record<string, 'Y' | 'N'>) =>
     SUPPLEMENTAL_WORKS.filter((w) => s?.[w.key] === 'Y').map((w) => w.label);
@@ -90,69 +98,60 @@ export default function AdminWorkPermitsPage() {
     router.push(`/admin/work-permits/${permitId}`);
   };
 
-  const visibleItems = unsignedOnly
-    ? items.filter((it) => (it.signature?.unsigned ?? 0) > 0)
-    : items;
+  const filtered = unsignedOnly ? items.filter((it) => (it.signature?.unsigned ?? 0) > 0) : items;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const curPage = Math.min(page, totalPages);
+  const visibleItems = filtered.slice((curPage - 1) * PAGE_SIZE, curPage * PAGE_SIZE);
+  const [my, mm] = month.split('-');
 
   return (
     <main className="space-y-4">
       <h1 className="text-xl font-bold text-slate-800">작업허가 신청 목록</h1>
 
       <div className="card space-y-3">
-        <input
-          className="input-base"
-          placeholder="신청번호·업체·작업명·신청인 검색"
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-        />
-        <div>
-          <label className="label">작업예정일 (작업 시작일 기준)</label>
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="date"
-              className="input-base"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              aria-label="작업예정일 시작"
-            />
-            <input
-              type="date"
-              className="input-base"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              aria-label="작업예정일 종료"
-            />
-          </div>
-        </div>
-        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={unsignedOnly}
-            onChange={(e) => setUnsignedOnly(e.target.checked)}
-            className="h-4 w-4"
-          />
-          ⚠️ 서명 미완료만 보기
-        </label>
-        <div className="flex gap-2">
+        {/* 조회 월 선택기 */}
+        <div className="flex items-center justify-center gap-3">
           <button
-            onClick={() => {
-              setKeyword('');
-              setDateFrom('');
-              setDateTo('');
-              setUnsignedOnly(false);
-              setTimeout(load, 0);
-            }}
-            className="btn-secondary"
-          >
-            초기화
-          </button>
-          <button onClick={load} className="btn-primary">{loading ? '조회 중...' : '조회'}</button>
+            onClick={() => setMonth((m) => shiftMonth(m, -1))}
+            className="h-9 w-9 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 text-lg leading-none"
+            aria-label="이전 달"
+          >◀</button>
+          <span className="text-base font-bold text-slate-800 w-32 text-center">{my}년 {Number(mm)}월</span>
+          <button
+            onClick={() => setMonth((m) => (m < maxMonth ? shiftMonth(m, 1) : m))}
+            disabled={month >= maxMonth}
+            className="h-9 w-9 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-30 text-lg leading-none"
+            aria-label="다음 달"
+          >▶</button>
+        </div>
+
+        {/* 통합 검색 (선택 월 안에서) */}
+        <div className="flex gap-2">
+          <input
+            className="input-base flex-1"
+            placeholder="신청번호·업체·작업명·신청인 검색"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); load(month, keyword); } }}
+          />
+          <button onClick={() => { setPage(1); load(month, keyword); }} className="btn-primary whitespace-nowrap">{loading ? '조회 중...' : '검색'}</button>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer select-none">
+            <input type="checkbox" checked={unsignedOnly} onChange={(e) => { setUnsignedOnly(e.target.checked); setPage(1); }} className="h-4 w-4" />
+            ⚠️ 서명 미완료만 보기
+          </label>
+          <button
+            onClick={() => { setKeyword(''); setUnsignedOnly(false); setMonth(thisMonth); setPage(1); if (month === thisMonth) load(thisMonth, ''); }}
+            className="text-xs text-slate-500 underline"
+          >이번 달로 초기화</button>
         </div>
       </div>
 
       <div className="space-y-2">
-        <p className="text-xs text-slate-500">
-          총 {visibleItems.length}건{unsignedOnly ? ` (서명 미완료만 · 전체 ${items.length}건)` : ''} · 카드를 누르면 상세/인쇄로 이동
+        <p className="text-sm font-semibold text-slate-700">
+          {my}년 {Number(mm)}월 · 총 {filtered.length}건{unsignedOnly ? ' (서명 미완료만)' : ''}
         </p>
         {visibleItems.map((it) => {
           const supp = suppLabels(it.supplemental);
@@ -235,9 +234,23 @@ export default function AdminWorkPermitsPage() {
             </div>
           );
         })}
-        {visibleItems.length === 0 && !loading && (
+        {filtered.length === 0 && !loading && (
           <div className="card text-center text-slate-500 py-8">
-            {unsignedOnly && items.length > 0 ? '서명 미완료 신청이 없습니다.' : '신청 내역이 없습니다.'}
+            {unsignedOnly && items.length > 0 ? '서명 미완료 신청이 없습니다.' : `${my}년 ${Number(mm)}월에 해당하는 작업허가가 없습니다.`}
+          </div>
+        )}
+
+        {/* 페이지네이션 */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-1 pt-2">
+            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={curPage <= 1}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm text-slate-600 disabled:opacity-30">이전</button>
+            {Array.from({ length: totalPages }).map((_, i) => (
+              <button key={i} onClick={() => setPage(i + 1)}
+                className={`h-8 w-8 rounded-lg text-sm font-semibold ${curPage === i + 1 ? 'bg-brand text-white' : 'text-slate-600 hover:bg-slate-100'}`}>{i + 1}</button>
+            ))}
+            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={curPage >= totalPages}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm text-slate-600 disabled:opacity-30">다음</button>
           </div>
         )}
       </div>

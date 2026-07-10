@@ -15,8 +15,7 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const keyword = (url.searchParams.get('keyword') ?? '').trim();
-  const dateFrom = (url.searchParams.get('dateFrom') ?? '').trim(); // 작업예정일 시작 (YYYY-MM-DD, KST)
-  const dateTo = (url.searchParams.get('dateTo') ?? '').trim();     // 작업예정일 종료 (YYYY-MM-DD, KST)
+  const month = (url.searchParams.get('month') ?? '').trim(); // 조회 월 (YYYY-MM, KST)
 
   const supabase = createServiceClient();
   let q = supabase
@@ -38,12 +37,14 @@ export async function GET(req: Request) {
     }
   }
 
-  // 작업예정일(work_start) 범위 필터 — KST 기준 일자
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) {
-    q = q.gte('work_start', `${dateFrom}T00:00:00+09:00`);
-  }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
-    q = q.lte('work_start', `${dateTo}T23:59:59+09:00`);
+  // 조회 월과 작업기간(work_start~work_end)이 겹치는 허가서 — KST 기준
+  //  겹침 조건: work_start <= 월말 AND work_end >= 월초
+  if (/^\d{4}-\d{2}$/.test(month)) {
+    const [y, m] = month.split('-').map(Number);
+    const lastDay = new Date(y, m, 0).getDate();
+    const monthStart = `${month}-01T00:00:00+09:00`;
+    const monthEnd = `${month}-${String(lastDay).padStart(2, '0')}T23:59:59+09:00`;
+    q = q.lte('work_start', monthEnd).gte('work_end', monthStart);
   }
 
   const { data: permits, error } = await q;
