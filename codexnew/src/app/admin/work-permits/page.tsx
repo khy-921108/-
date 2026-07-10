@@ -126,15 +126,19 @@ export default function AdminWorkPermitsPage() {
         </div>
 
         {/* 통합 검색 (선택 월 안에서) */}
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-stretch">
           <input
-            className="input-base flex-1"
+            className="input-base flex-1 min-w-0"
             placeholder="신청번호·업체·작업명·신청인 검색"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); load(month, keyword); } }}
           />
-          <button onClick={() => { setPage(1); load(month, keyword); }} className="btn-primary whitespace-nowrap">{loading ? '조회 중...' : '검색'}</button>
+          <button
+            onClick={() => { setPage(1); load(month, keyword); }}
+            className="shrink-0 rounded-xl bg-brand text-white text-sm font-semibold px-5 whitespace-nowrap disabled:opacity-50"
+            disabled={loading}
+          >{loading ? '조회 중…' : '검색'}</button>
         </div>
 
         <div className="flex items-center justify-between">
