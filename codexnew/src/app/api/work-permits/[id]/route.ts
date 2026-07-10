@@ -142,7 +142,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       permitNumber: permit.permit_number,
       permitType: permit.permit_type,
       status: permit.status,
-      stage: stageFromRow(permit), // R-6 진행단계(뱃지)
+      stage: stageFromRow(permit, Date.now()), // R-6 진행단계(뱃지, 미종료 판정 포함)
       companyName: permit.request_company_name,
       info: {
         workName: permit.work_name,

@@ -20,6 +20,8 @@ export type StageKey =
   | 'START_READY'   // 작업개시 가능
   | 'IN_PROGRESS'   // 승인 진행중 (목록 경량뱃지 — 중간단계 통합)
   | 'STARTED'       // 작업개시
+  | 'OVERDUE'       // 미종료 (작업개시했으나 기간 경과+종료확인 없음)
+  | 'EXPIRED'       // 기간 경과 (개시 안 하고 기간만 지남)
   | 'CLOSED'        // 작업종료
   | 'REJECTED';     // 반려
 
@@ -33,6 +35,17 @@ export interface StageInput {
   deptConfirmations?: Record<string, { signature?: string | null } | undefined> | null;
   startedAt?: string | null;
   completionConfirmed?: boolean;
+  /** 작업 종료 예정일시(ISO). now 와 함께 있으면 "미종료/기간 경과" 판정에 사용. */
+  workEnd?: string | null;
+  /** 판정 시각(epoch ms). 렌더/요청 시점. 없으면 미종료 판정 생략(하위호환). */
+  now?: number;
+}
+
+/** work_end 가 now 이전이면 기간 경과(true). 자동 종료 처리 아님 — 표시용 판정만. */
+function isPastEnd(workEnd?: string | null, now?: number): boolean {
+  if (!workEnd || !now) return false;
+  const ended = new Date(workEnd).getTime();
+  return !Number.isNaN(ended) && ended < now;
 }
 
 export interface Stage { key: StageKey; label: string }
@@ -41,6 +54,10 @@ const isSig = (s?: string | null): boolean => !!(s && String(s).startsWith('data
 
 export function computeStage(i: StageInput): Stage {
   if (i.completionConfirmed) return { key: 'CLOSED', label: '작업종료' };
+  // 미종료 판정: 종료확인 없이 기간 경과(반려 제외). 개시 여부로 미종료/기간 경과 구분.
+  if ((i.status ?? '') !== 'REJECTED' && isPastEnd(i.workEnd, i.now)) {
+    return i.startedAt ? { key: 'OVERDUE', label: '미종료' } : { key: 'EXPIRED', label: '기간 경과' };
+  }
   if (i.startedAt) return { key: 'STARTED', label: '작업개시' };
   if ((i.status ?? '') === 'REJECTED') return { key: 'REJECTED', label: '반려' };
 
@@ -64,8 +81,8 @@ export function computeStage(i: StageInput): Stage {
   return { key: 'START_READY', label: '작업개시 가능' };
 }
 
-/** work_permits row(스네이크) → StageInput 정규화 후 stage 계산 */
-export function stageFromRow(row: any): Stage {
+/** work_permits row(스네이크) → StageInput 정규화 후 stage 계산. now 주면 미종료 판정 포함. */
+export function stageFromRow(row: any, now?: number): Stage {
   const tbm = (row?.tbm ?? {}) as Record<string, any>;
   const confs = tbm.confirmations ?? {};
   const workerConfirmCount = Object.values(confs).filter((c: any) => isSig(c?.signature)).length;
@@ -80,6 +97,8 @@ export function stageFromRow(row: any): Stage {
     deptConfirmations: row?.dept_confirmations ?? {},
     startedAt: row?.started_at ?? null,
     completionConfirmed: isSig(comp.confirmSignature),
+    workEnd: row?.work_end ?? null,
+    now,
   });
 }
 
@@ -89,10 +108,15 @@ export function stageFromRow(row: any): Stage {
  * 정확: 대기/작업개시(started_at)/작업종료(status COMPLETED=R-6 전용)/반려. 중간단계는 '승인 진행중'으로 통합.
  * 상세화면은 단일행이라 computeStage 로 정밀 표시.
  */
-export function stageFromLightRow(row: any): Stage {
-  if ((row?.status ?? '') === 'COMPLETED') return { key: 'CLOSED', label: '작업종료' };
+export function stageFromLightRow(row: any, now?: number): Stage {
+  const status = row?.status ?? '';
+  if (status === 'COMPLETED') return { key: 'CLOSED', label: '작업종료' };
+  // 미종료 판정: 종료(COMPLETED)·반려 아니면서 기간 경과. 개시 여부로 구분.
+  if (status !== 'REJECTED' && isPastEnd(row?.work_end, now)) {
+    return row?.started_at ? { key: 'OVERDUE', label: '미종료' } : { key: 'EXPIRED', label: '기간 경과' };
+  }
   if (row?.started_at) return { key: 'STARTED', label: '작업개시' };
-  if ((row?.status ?? '') === 'REJECTED') return { key: 'REJECTED', label: '반려' };
+  if (status === 'REJECTED') return { key: 'REJECTED', label: '반려' };
   if (!isSig(row?.issuer_signature)) return { key: 'WAITING', label: '대기' };
   return { key: 'IN_PROGRESS', label: '승인 진행중' };
 }
@@ -106,6 +130,8 @@ export const STAGE_BADGE_CLASS: Record<StageKey, string> = {
   START_READY: 'bg-sky-100 text-sky-700',
   IN_PROGRESS: 'bg-amber-100 text-amber-700',
   STARTED: 'bg-emerald-100 text-emerald-700',
+  OVERDUE: 'bg-red-500 text-white',       // 미종료 — 강조(빨강)
+  EXPIRED: 'bg-slate-200 text-slate-600', // 기간 경과 — 회색
   CLOSED: 'bg-indigo-100 text-indigo-700',
   REJECTED: 'bg-red-100 text-red-700',
 };

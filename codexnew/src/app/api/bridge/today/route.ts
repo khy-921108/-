@@ -86,5 +86,32 @@ export async function GET(req: Request) {
     ongoing.push({ ...base, stage });
   }
 
-  return NextResponse.json({ date: ymd, ongoing, completedToday });
+  // 미종료: 작업개시했으나 work_end(예정 종료)가 오늘 0시 이전 + 종료확인 없음(반려 제외).
+  //  ⚠️ 개인정보 금지 — 허가번호·업체·작업종류·경과일수만. 자동 종료 처리 아님(표시용).
+  const { data: pastPermits } = await supabase
+    .from('work_permits')
+    .select('permit_number, request_company_name, supplemental, status, work_end, started_at, completion')
+    .lt('work_end', todayStart)
+    .neq('status', 'REJECTED')
+    .not('started_at', 'is', null)
+    .order('work_end', { ascending: false })
+    .limit(100);
+
+  const dayMs = 24 * 3600 * 1000;
+  const todayStartMs = new Date(todayStart).getTime();
+  const unfinished: any[] = [];
+  for (const p of pastPermits ?? []) {
+    const comp = (p.completion ?? {}) as any;
+    if (isSig(comp.confirmSignature)) continue; // 이미 종료확인 = 완료
+    const endMs = new Date(p.work_end).getTime();
+    const overdueDays = Number.isNaN(endMs) ? 1 : Math.max(1, Math.floor((todayStartMs - endMs) / dayMs) + 1);
+    unfinished.push({
+      permitNumber: p.permit_number,
+      companyName: p.request_company_name,
+      workType: workType(p.supplemental ?? {}),
+      overdueDays,
+    });
+  }
+
+  return NextResponse.json({ date: ymd, ongoing, completedToday, unfinished });
 }

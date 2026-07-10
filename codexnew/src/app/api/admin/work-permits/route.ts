@@ -81,6 +81,7 @@ export async function GET(req: Request) {
     console.error('[admin/work-permits] signature status:', e);
   }
 
+  const now = Date.now(); // 미종료/기간 경과 판정 기준(렌더 시각)
   const items = (permits ?? []).map((p: any) => {
     const sig = sigMap[p.id] ?? { total: 0, signed: 0, unsigned: 0, unsignedNames: [], participants: [] };
     return {
@@ -95,7 +96,7 @@ export async function GET(req: Request) {
       participantCount: countMap.get(p.id) ?? 0,
       supplemental: p.supplemental ?? {},
       status: p.status,
-      stage: stageFromLightRow(p), // R-6 진행단계(목록 경량뱃지) — 무거운 서명 blob 조회 회피
+      stage: stageFromLightRow(p, now), // R-6 진행단계(목록 경량뱃지) — 무거운 서명 blob 조회 회피
       approvedBy: p.approved_by ?? null,
       approvedAt: p.approved_at ?? null,
       createdAt: p.created_at,

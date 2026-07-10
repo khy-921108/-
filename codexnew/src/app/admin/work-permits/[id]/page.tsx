@@ -294,6 +294,18 @@ export default function AdminWorkPermitDetailPage() {
 
       {banner && <div className="card bg-red-50 border border-red-200 text-red-700 text-sm">{banner}</div>}
 
+      {/* 미종료 안내 — 자동 종료 없음, 표시·안내만 */}
+      {data.stage?.key === 'OVERDUE' && (
+        <div className="card bg-red-50 border border-red-200 text-red-700 text-sm">
+          🔴 <b>미종료</b> — 작업 종료 예정일시가 지났으나 종료확인이 완료되지 않았습니다. 아래 <b>작업완료(종료 신고 → 확인)</b>를 진행해 주세요.
+        </div>
+      )}
+      {data.stage?.key === 'EXPIRED' && (
+        <div className="card bg-slate-50 border border-slate-200 text-slate-600 text-sm">
+          ⚪ <b>기간 경과</b> — 작업개시 없이 예정일시가 지났습니다. 필요 시 되돌리기 또는 재신청으로 처리하세요.
+        </div>
+      )}
+
       {/* 기본정보 */}
       <section className="card space-y-1.5 text-sm">
         <h2 className="font-bold text-slate-700 mb-2">기본정보</h2>

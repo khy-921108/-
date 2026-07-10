@@ -68,6 +68,7 @@ export async function POST(req: Request) {
       );
     }
 
+    const nowMs = Date.now(); // 미종료/기간 경과 판정 기준
     const items = (permits ?? []).map((p: any) => ({
       permitId: p.id,
       permitNumber: p.permit_number,
@@ -77,7 +78,7 @@ export async function POST(req: Request) {
       companyName: p.request_company_name,
       supplemental: p.supplemental ?? {},
       status: p.status,
-      stage: stageFromLightRow(p), // R-6 진행단계(목록 경량뱃지)
+      stage: stageFromLightRow(p, nowMs), // R-6 진행단계(목록 경량뱃지, 미종료 판정 포함)
       createdAt: p.created_at,
       issued: !!(p.issuer_signature && String(p.issuer_signature).startsWith('data:image/')), // 1차 승인 여부
     }));
