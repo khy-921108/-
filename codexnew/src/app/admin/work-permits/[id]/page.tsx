@@ -86,6 +86,12 @@ export default function AdminWorkPermitDetailPage() {
   const [saving, setSaving] = useState(false);
   const [modalErr, setModalErr] = useState('');
 
+  // 이전 단계로 되돌리기(반려와 별개)
+  const [rbModal, setRbModal] = useState<null | { step: 'issuer' | 'witness' | 'dept'; supKey?: string; label: string }>(null);
+  const [rbReason, setRbReason] = useState('');
+  const [rbSaving, setRbSaving] = useState(false);
+  const [rbErr, setRbErr] = useState('');
+
   const load = useCallback(async () => {
     // 읽기(조회)에 15초 클라 타임아웃 — Supabase 지연 시 화면이 매달리지 않게
     const tf = (url: string) => {
@@ -221,6 +227,53 @@ export default function AdminWorkPermitDetailPage() {
     <button onClick={on} className={`text-xs px-3 py-1.5 rounded-lg font-bold ${kind === 'warn' ? 'bg-amber-500 text-white hover:bg-amber-600' : 'btn-primary'}`}>{label}</button>
   );
 
+  // ===== 이전 단계로 되돌리기 =====
+  // 서버와 동일 판정: 별지(3차) → 2차 입회 → 1차 발급 중 "마지막 완료 단계" 1칸만.
+  const rbSignedSup = checkedSupp
+    .filter((w) => !!deptConfs[w.key]?.signature)
+    .sort((a, b) => String(deptConfs[b.key]?.at ?? '').localeCompare(String(deptConfs[a.key]?.at ?? '')));
+  const rbTarget: { step: 'issuer' | 'witness' | 'dept'; supKey?: string; label: string } | null =
+    rbSignedSup.length > 0
+      ? { step: 'dept', supKey: rbSignedSup[0].key, label: `${rbSignedSup[0].label} 별지 현장확인` }
+      : witnessSigned
+        ? { step: 'witness', label: '2차 입회' }
+        : issuerSigned
+          ? { step: 'issuer', label: '1차 발급' }
+          : null;
+  // 작업개시·종료신고 이후 불가. 권한은 서버가 최종 강제(SUPER=전부 / 그외=본인 서명 단계).
+  const rbAllowed = !started && !comp.workerSignature;
+  const rbCanRole = isSuper || hasApprove || hasDeptConfirm;
+  const rbShow = (step: 'issuer' | 'witness' | 'dept', supKey?: string) =>
+    rbAllowed && rbCanRole && rbTarget?.step === step && (step !== 'dept' || rbTarget?.supKey === supKey);
+  const openRollback = (t: { step: 'issuer' | 'witness' | 'dept'; supKey?: string; label: string }) => {
+    setRbReason(''); setRbErr(''); setRbModal(t);
+  };
+  const rbBtn = (t: { step: 'issuer' | 'witness' | 'dept'; supKey?: string; label: string }) => (
+    <button onClick={() => openRollback(t)}
+      className="text-xs px-2.5 py-1.5 rounded-lg font-bold border border-red-300 text-red-600 hover:bg-red-50 whitespace-nowrap">
+      ↩ 이전 단계로 되돌리기
+    </button>
+  );
+  const submitRollback = async () => {
+    if (!rbModal) return;
+    if (!rbReason.trim()) { setRbErr('되돌리기 사유를 입력해 주세요.'); return; }
+    setRbSaving(true); setRbErr('');
+    try {
+      const b: any = { action: 'rollback', reason: rbReason.trim(), expectedStep: rbModal.step };
+      if (rbModal.supKey) b.expectedSupKey = rbModal.supKey;
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), 20000);
+      const res = await fetch(`/api/admin/work-permits/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b), signal: ac.signal,
+      }).finally(() => clearTimeout(t));
+      const json = await res.json();
+      if (!json.success) { setRbErr(json.message || '되돌리기 실패'); setRbSaving(false); return; }
+      setRbModal(null); setRbSaving(false); load();
+    } catch {
+      setRbErr('저장 지연 또는 네트워크 오류입니다. 잠시 후 다시 시도해 주세요.'); setRbSaving(false);
+    }
+  };
+
   return (
     <main className="space-y-5">
       {/* 헤더 */}
@@ -336,12 +389,20 @@ export default function AdminWorkPermitDetailPage() {
         <SigRow label="신청인" sub="TBM 팀장 겸용" signature={data.applicantSignature} who={info.applicantName} at={data.createdAt} />
         <SigRow label="안전관리자" sub="TBM 확인" signature={tbm.safetyManager?.signature} who={tbm.safetyManager?.name} />
         <SigRow label="발급 (1차)" sub="안전환경" signature={data.issuer?.signature} who={slabel(data.issuer?.name)} at={data.issuer?.at}
-          action={hasApprove && !started ? btn(issuerSigned ? '재서명' : '1차 승인', () => { if (issuerSigned && !confirm('발급 서명을 다시 하면 덮어씁니다. 계속할까요?')) return; openModal({ type: 'issue' }); }) : null} />
+          action={(hasApprove && !started) || rbShow('issuer') ? (
+            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+              {hasApprove && !started && btn(issuerSigned ? '재서명' : '1차 승인', () => { if (issuerSigned && !confirm('발급 서명을 다시 하면 덮어씁니다. 계속할까요?')) return; openModal({ type: 'issue' }); })}
+              {rbShow('issuer') && rbBtn({ step: 'issuer', label: '1차 발급' })}
+            </div>
+          ) : null} />
         <SigRow label="입회 (2차)" sub="안전환경 현장입회" signature={witness?.signature} who={slabel(witness?.by)} at={witness?.at}
-          action={hasApprove && !started ? (
-            issuerSigned
-              ? btn(witnessSigned ? '재서명' : '2차 승인', startWitness)
-              : <span className="text-[11px] text-slate-400">1차 후 가능</span>
+          action={(hasApprove && !started) || rbShow('witness') ? (
+            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+              {hasApprove && !started && (issuerSigned
+                ? btn(witnessSigned ? '재서명' : '2차 승인', startWitness)
+                : <span className="text-[11px] text-slate-400">1차 후 가능</span>)}
+              {rbShow('witness') && rbBtn({ step: 'witness', label: '2차 입회' })}
+            </div>
           ) : null} />
       </section>
 
@@ -387,7 +448,12 @@ export default function AdminWorkPermitDetailPage() {
                 ) : (
                   <span className="rounded-full text-xs font-medium px-2 py-0.5 bg-amber-50 text-amber-700">대기</span>
                 )}
-                {action && <div className="ml-auto shrink-0">{action}</div>}
+                {(action || rbShow('dept', w.key)) && (
+                  <div className="ml-auto shrink-0 flex items-center gap-1.5 flex-wrap justify-end">
+                    {action}
+                    {rbShow('dept', w.key) && rbBtn({ step: 'dept', supKey: w.key, label: `${w.label} 별지 현장확인` })}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -427,6 +493,50 @@ export default function AdminWorkPermitDetailPage() {
           ) : null} />
         {comp.restoreState && <Row k="복원상태" v={comp.restoreState} />}
       </section>
+
+      {/* 되돌리기 이력 */}
+      {Array.isArray(data.rollbackLogs) && data.rollbackLogs.length > 0 && (
+        <details className="card">
+          <summary className="cursor-pointer font-bold text-slate-700 text-sm select-none">
+            ↩ 되돌리기 이력 {data.rollbackLogs.length}건
+          </summary>
+          <ul className="mt-3 space-y-2 text-xs">
+            {data.rollbackLogs.map((l: any, i: number) => (
+              <li key={i} className="border-b border-slate-100 pb-2 last:border-0">
+                <span className="font-semibold text-red-600">{l.label || l.stage}</span>
+                <span className="text-slate-500"> 취소</span>
+                <span className="text-slate-400"> · {l.by || '-'} · {fmtDateTime(l.at)}</span>
+                {l.reason && <p className="text-slate-600 mt-0.5">사유: {l.reason}</p>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {/* 되돌리기 모달 */}
+      {rbModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !rbSaving && setRbModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-bold text-red-700">↩ 이전 단계로 되돌리기</h3>
+            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-slate-700 space-y-1">
+              <p><span className="font-bold text-red-700">{rbModal.label}</span> 단계를 취소합니다.</p>
+              <p className="text-xs text-slate-600">해당 서명이 삭제되고, 취소 기록(사유 포함)이 영구 남습니다. 반려가 아니며 서류는 유지됩니다.</p>
+            </div>
+            <div>
+              <label className="label">되돌리기 사유 <span className="text-red-500">*</span></label>
+              <textarea className="input-base min-h-[72px]" placeholder="예: TBM 참여자 누락 발견 — 인원 추가 후 재승인" value={rbReason} onChange={(e) => setRbReason(e.target.value)} />
+            </div>
+            {rbErr && <p className="text-sm text-red-600">{rbErr}</p>}
+            <div className="flex gap-2 justify-end pt-1">
+              <button className="btn-secondary" onClick={() => setRbModal(null)} disabled={rbSaving}>취소</button>
+              <button
+                className="text-sm px-4 py-2 rounded-lg font-bold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                onClick={submitRollback} disabled={rbSaving}
+              >{rbSaving ? '처리 중…' : '되돌리기'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 모달 */}
       {modal && (

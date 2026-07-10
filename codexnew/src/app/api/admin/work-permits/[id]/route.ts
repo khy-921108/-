@@ -54,7 +54,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   }
   const action = body?.action;
   const signature = typeof body?.signature === 'string' ? body.signature : '';
-  const needSig = action !== 'start_work';
+  const needSig = action !== 'start_work' && action !== 'rollback'; // 되돌리기·개시는 서명 없음
   if (needSig && !signature.startsWith('data:image/')) {
     return NextResponse.json({ success: false, code: 'NO_SIGNATURE', message: '서명이 필요합니다.' }, { status: 400 });
   }
@@ -74,7 +74,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   const { data: permit, error: readErr } = await withTimeout(
     supabase
       .from('work_permits')
-      .select('id, status, supplemental, issuer_signature, tbm, dept_confirmations, completion')
+      .select('id, status, supplemental, issuer_signature, tbm, dept_confirmations, completion, approved_by, started_at, rollback_logs')
       .eq('id', ctx.params.id)
       .maybeSingle(),
     'select'
@@ -193,6 +193,78 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     const { error } = await patchPermit({ status: 'APPROVED', started_by: actor, started_at: now });
     if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
     return NextResponse.json({ success: true, data: { action, by: actor, at: now, status: 'APPROVED' } });
+  }
+
+  // ===== 이전 단계로 되돌리기(반려와 별개) =====
+  //  현재 완료된 "마지막 단계" 1칸만 취소. 해당 단계의 서명·서명자·시각만 삭제하고
+  //  rollback_logs 에 {stage,label,supKey,by,at,reason} 영구 append. TBM(업체 사진·서명)은 건드리지 않음.
+  if (action === 'rollback') {
+    const isSig = (s: any) => !!(s && String(s).startsWith('data:image/'));
+    const reason = typeof body?.reason === 'string' ? body.reason.trim() : '';
+    if (!reason) return fail('NO_REASON', '되돌리기 사유를 입력해 주세요.');
+
+    // 작업개시(또는 종료 신고/확인) 이후에는 되돌리기 불가
+    const comp = (permit.completion ?? {}) as Record<string, any>;
+    if (permit.started_at || isSig(comp.workerSignature) || isSig(comp.confirmSignature)) {
+      return fail('AFTER_START', '작업이 개시(또는 종료)된 허가서는 되돌릴 수 없습니다.', 409);
+    }
+
+    // 되돌릴 "마지막 완료 단계" 판정: 별지(3차) → 2차 입회 → 1차 발급 순
+    const tbm = (permit.tbm ?? {}) as Record<string, any>;
+    const confs = (permit.dept_confirmations ?? {}) as Record<string, any>;
+    const supp = (permit.supplemental ?? {}) as Record<string, string>;
+    const signedSup = Object.keys(supp)
+      .filter((k) => supp[k] === 'Y' && isSig(confs[k]?.signature))
+      .sort((a, b) => String(confs[b]?.at ?? '').localeCompare(String(confs[a]?.at ?? ''))); // 최근 확인 우선
+
+    let step: 'issuer' | 'witness' | 'dept';
+    let supKey: string | null = null;
+    let signer: string | null = null;
+    let label: string;
+    if (signedSup.length > 0) {
+      step = 'dept'; supKey = signedSup[0];
+      signer = confs[supKey]?.by ?? null;
+      label = `${supplementalLabel(supKey as SupplementalKey)} 별지 현장확인`;
+    } else if (isSig(tbm.witness?.signature)) {
+      step = 'witness'; signer = tbm.witness?.by ?? null; label = '2차 입회';
+    } else if (isSig(permit.issuer_signature)) {
+      step = 'issuer'; signer = permit.approved_by ?? null; label = '1차 발급';
+    } else {
+      return fail('NOTHING_TO_ROLLBACK', '되돌릴 완료 단계가 없습니다.', 409);
+    }
+
+    // 화면이 본 단계와 서버 상태가 어긋나면(그새 상태 변경) 거부 — 엉뚱한 단계 취소 방지
+    if (body?.expectedStep && body.expectedStep !== step) {
+      return fail('STEP_CHANGED', '단계 상태가 변경되었습니다. 새로고침 후 다시 시도해 주세요.', 409);
+    }
+    if (step === 'dept' && body?.expectedSupKey && body.expectedSupKey !== supKey) {
+      return fail('STEP_CHANGED', '단계 상태가 변경되었습니다. 새로고침 후 다시 시도해 주세요.', 409);
+    }
+
+    // 권한: SUPER 는 모든 단계 / 그 외에는 본인이 서명한 단계만
+    const mine = !!signer && String(signer).toLowerCase() === String(actor).toLowerCase();
+    if (!isSuper && !mine) {
+      return fail('NOT_OWNER', '본인이 서명한 단계만 되돌릴 수 있습니다. (관리자에게 요청)', 403);
+    }
+
+    const logs = Array.isArray(permit.rollback_logs) ? permit.rollback_logs : [];
+    const entry = { stage: step, label, supKey, by: actor, at: now, reason };
+    const fields: Record<string, any> = { rollback_logs: [...logs, entry] };
+    if (step === 'issuer') {
+      // 1차 발급 취소 → 승인 대기 복귀(포털 승인대기 목록에도 자동 재등장). 서명·직책·승인자·시각만 삭제.
+      fields.issuer_signature = null; fields.issuer_title = null;
+      fields.approved_by = null; fields.approved_at = null;
+    } else if (step === 'witness') {
+      // 2차 입회 취소 → witness(서명·시각·서명자)만 삭제. 안전지시사항·TBM 사진/서명은 보존.
+      const t = { ...tbm }; delete t.witness; fields.tbm = t;
+    } else {
+      // 별지(3차) 취소 → 해당 별지 확인 스냅샷만 삭제.
+      const c = { ...confs }; delete c[supKey as string]; fields.dept_confirmations = c;
+    }
+
+    const { error } = await patchPermit(fields);
+    if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
+    return NextResponse.json({ success: true, data: { action, step, supKey, label, by: actor, at: now } });
   }
 
   return fail('BAD_ACTION', '알 수 없는 동작입니다.');

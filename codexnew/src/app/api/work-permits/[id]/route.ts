@@ -25,7 +25,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
        tbm, supplemental, note, created_at,
        applicant_signature, issuer_title, issuer_signature, approved_by, approved_at,
        approver_name, approver_title, approver_signature, approval_mode, approver_signed_at,
-       completion, dept_confirmations, started_by, started_at`
+       completion, dept_confirmations, started_by, started_at, rollback_logs`
     )
     .eq('id', ctx.params.id)
     .maybeSingle();
@@ -64,6 +64,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
   const tbmObj = (permit.tbm ?? {}) as Record<string, any>;
   const compObj = (permit.completion ?? {}) as Record<string, any>;
   const deptObj = (permit.dept_confirmations ?? {}) as Record<string, any>;
+  const rollbackLogsRaw: any[] = Array.isArray(permit.rollback_logs) ? permit.rollback_logs : [];
   const signerEmails = [
     permit.approved_by,
     permit.started_by,
@@ -71,6 +72,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     compObj.reportBy,
     compObj.confirmBy,
     ...Object.values(deptObj).map((v: any) => v?.by),
+    ...rollbackLogsRaw.map((l: any) => l?.by),
   ];
   const signerLabelMap = await resolveSignerLabels(supabase, signerEmails);
   // 표시명 변환기(공개 응답에 이메일 원문 노출 금지 — 등록명 or 이메일 앞부분)
@@ -173,6 +175,15 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       deptConfirmations: safeDept,
       startedBy: lab(permit.started_by),
       startedAt: permit.started_at ?? null,
+      // 되돌리기 이력(표시용) — 서명자 이메일은 표시명으로 변환(공개 응답에 이메일 노출 금지)
+      rollbackLogs: rollbackLogsRaw.map((l: any) => ({
+        stage: l?.stage ?? null,
+        label: l?.label ?? null,
+        supKey: l?.supKey ?? null,
+        by: lab(l?.by),
+        at: l?.at ?? null,
+        reason: l?.reason ?? null,
+      })),
       qrDataUrl,
       tbmPhotoUrls,
       participants: (parts ?? []).map((p: any) => ({

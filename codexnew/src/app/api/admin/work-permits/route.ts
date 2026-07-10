@@ -4,6 +4,10 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { getSignatureStatusForPermits } from '@/lib/safety-doc-status';
 import { stageFromLightRow } from '@/lib/work-permit-stage';
 
+// 목록은 승인·되돌리기로 수시 변하므로 라우트 캐시 금지(과거 stale 캐시 버그 재발 방지 원칙).
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
+
 /**
  * GET /api/admin/work-permits  (requireAdmin) — 신청 목록
  * res: { success, data:{ items:[{permitId,permitNumber,permitType,companyName,workName,
