@@ -1,20 +1,34 @@
 'use client';
 
+/**
+ * QR/인쇄 화면 — 회사양식(엑셀) 재현 문서뷰 (게이트③-5 D안).
+ * 법적 원본 = 회사양식(.xlsx). 이 화면은 전자 확인용.
+ * ⚠️ 양식/서명 규칙/xlsx 채움 로직이 바뀌면 이 화면 동기화 필요(검토요약.md §양식-인쇄 동기화 규칙).
+ * 데이터: 공개 GET /api/work-permits/[id] 재사용(정화됨 — 이메일 노출 없음).
+ */
+
 import { useEffect, useState } from 'react';
-import { GENERAL_SAFETY_MEASURES, SUPPLEMENTAL_WORKS, TBM_CHECKLIST } from '@/lib/work-permit-constants';
+import { SUPPLEMENTAL_WORKS, GENERAL_SAFETY_MEASURES, TBM_CHECKLIST } from '@/lib/work-permit-constants';
 import { workTypesFor } from '@/lib/work-permit-types';
 
-function fmtDate(iso: string): string {
-  if (!iso) return '-';
-  const k = new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${k.getUTCFullYear()}.${p(k.getUTCMonth() + 1)}.${p(k.getUTCDate())}`;
-}
-function fmtDateTime(iso: string): string {
-  if (!iso) return '-';
-  const k = new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${k.getUTCFullYear()}.${p(k.getUTCMonth() + 1)}.${p(k.getUTCDate())} ${p(k.getUTCHours())}:${p(k.getUTCMinutes())}`;
+const p2 = (n: number) => String(n).padStart(2, '0');
+function kst(iso?: string | null) { return iso ? new Date(new Date(iso).getTime() + 9 * 3600 * 1000) : null; }
+function fmtDate(iso?: string | null) { const k = kst(iso); return k ? `${k.getUTCFullYear()}.${p2(k.getUTCMonth() + 1)}.${p2(k.getUTCDate())}` : '-'; }
+function fmtDateTime(iso?: string | null) { const k = kst(iso); return k ? `${k.getUTCFullYear()}.${p2(k.getUTCMonth() + 1)}.${p2(k.getUTCDate())} ${p2(k.getUTCHours())}:${p2(k.getUTCMinutes())}` : '-'; }
+function fmtLog(iso?: string | null) { const k = kst(iso); return k ? `${p2(k.getUTCMonth() + 1)}-${p2(k.getUTCDate())} ${p2(k.getUTCHours())}:${p2(k.getUTCMinutes())}` : ''; }
+
+/** 서명칸: 손서명 이미지 + 오른쪽아래 로그(이름·시각) / 미서명이면 "(서명)" 연회색 placeholder */
+function Sig({ sig, name, at, w = 150, h = 34 }: { sig?: string | null; name?: string | null; at?: string | null; w?: number; h?: number }) {
+  const has = !!(sig && String(sig).startsWith('data:image/'));
+  if (!has) return <span className="sigph">{name ? `${name} ` : ''}(서명)</span>;
+  const log = [name, fmtLog(at)].filter(Boolean).join(' · ');
+  return (
+    <span className="sigwrap" style={{ minWidth: w }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={sig!} alt="서명" className="sigimg" style={{ maxWidth: w, maxHeight: h }} />
+      {log && <span className="siglog">{log}</span>}
+    </span>
+  );
 }
 
 export default function WorkPermitPrint({ params }: { params: { id: string } }) {
@@ -24,296 +38,284 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/api/work-permits/${params.id}`);
+        const res = await fetch(`/api/work-permits/${params.id}`, { cache: 'no-store' });
         const json = await res.json();
         if (json.success) setData(json.data);
         else setErr(json.message || '조회 실패');
-      } catch {
-        setErr('네트워크 오류');
-      }
+      } catch { setErr('네트워크 오류'); }
     })();
   }, [params.id]);
 
   if (err) return <main className="p-6 text-center text-red-600">{err}</main>;
   if (!data) return <main className="p-6 text-center text-slate-500">불러오는 중...</main>;
 
-  const info = data.info;
+  const info = data.info ?? {};
   const supp = data.supplemental ?? {};
+  const tbm = data.tbm ?? {};
+  const comp = data.completion ?? {};
+  const dept = data.deptConfirmations ?? {};
+  const docs = data.docs ?? null;
+  const suppTypes = workTypesFor(supp);
+  const parts: any[] = data.participants ?? [];
+  const photos: string[] = data.tbmPhotoUrls ?? [];
+
+  // 참여자 확인 서명(돌려서명) name → {signature, at}
+  const confList: any[] = Object.values(tbm.confirmations ?? {});
+  const confByName = new Map<string, { signature: string; at?: string }>();
+  for (const c of confList) if (c?.signature) confByName.set((c.name ?? '').trim(), { signature: c.signature, at: c.confirmedAt });
+  // 서약 서명 name → {signature}
+  const pledges: any[] = docs?.pledges ?? [];
+  const pledgeSig = new Map<string, string>();
+  for (const pl of pledges) if (pl?.signature) pledgeSig.set((pl.name ?? '').trim(), pl.signature);
+  // 이름으로 서명 찾기(서약 우선 → TBM 확인) — 교육/각서 명단 재사용
+  const sigOf = (name?: string | null) => {
+    const n = (name ?? '').trim();
+    return pledgeSig.get(n) ?? confByName.get(n)?.signature ?? null;
+  };
+
+  const suppLabels = SUPPLEMENTAL_WORKS.filter((w) => supp[w.key] === 'Y').map((w) => w.label);
   const left = GENERAL_SAFETY_MEASURES.filter((m) => m.side === 'L');
   const right = GENERAL_SAFETY_MEASURES.filter((m) => m.side === 'R');
-  const docs = data.docs ?? null;
-  const suppTypes = workTypesFor(supp); // 1C-3 보충작업 별지(체크분만)
 
-  // 개인서약 서명 완료/미완료 집계 (화면 안내용 — 인쇄에는 미표시)
-  const plg: any[] = docs?.pledges ?? [];
-  const unsignedNames = plg.filter((p) => !p.signature).map((p) => p.name);
-  const sigTotal = plg.length;
-  const sigSigned = sigTotal - unsignedNames.length;
+  // 별지 관련부서 3차 확인 라벨
+  const deptCell = (key: string) => {
+    const dc = dept[key];
+    if (!dc?.signature) return <Sig sig={null} />;
+    if (dc.mode === 'EMERGENCY_PROXY') return <Sig sig={dc.signature} name={`긴급대리(안전환경)${dc.reason ? ` · ${dc.reason}` : ''}`} at={dc.at} />;
+    return <Sig sig={dc.signature} name={dc.name || dc.by} at={dc.at} />;
+  };
 
   return (
     <main className="wp-print">
-      {/* 화면 전용 버튼 */}
-      <div className="no-print mb-4 flex gap-2">
-        <button onClick={() => window.print()} className="btn-primary">🖨 인쇄</button>
-        <a href={`/api/work-permits/${params.id}/xlsx`} className="btn-secondary text-center">📥 회사 양식 .xlsx</a>
+      {/* 경고 배너 (화면·인쇄 공통) */}
+      <div className="warn">
+        ⚠️ 이 화면은 개인정보(성명·연락처·생년월일)와 서명이 포함된 <b>작업허가 확인용</b> 문서입니다. 무단 열람·유출을 금합니다.
       </div>
 
-      {/* 화면 전용 서명 상태 안내 */}
-      {sigTotal > 0 && (
-        unsignedNames.length === 0 ? (
-          <div className="no-print mb-4 rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-700">
-            ✅ 참여자 개인서약 서명 완료 ({sigSigned}/{sigTotal}명)
-          </div>
-        ) : (
-          <div className="no-print mb-4 rounded-xl bg-amber-50 border border-amber-300 p-3 text-sm text-amber-800 space-y-1">
-            <p>⚠️ 개인서약 <b>서명 미완료 {unsignedNames.length}명</b> ({sigSigned}/{sigTotal} 완료) — 미서명자는 출력본에 빈칸으로 인쇄됩니다.</p>
-            <p className="text-xs">미서명: {unsignedNames.join(', ')}</p>
-            <p className="text-xs">※ 작업 시작 전까지 본인이 <a href="/work-permit/sign" className="font-bold underline">‘내 서약 서명’</a>에서 서명하면 됩니다.</p>
-          </div>
-        )
-      )}
+      {/* 화면 전용 버튼 */}
+      <div className="no-print toolbar">
+        <button onClick={() => window.print()} className="btn-primary">🖨 인쇄</button>
+        <a href={`/api/work-permits/${params.id}/xlsx`} className="btn-secondary">📥 회사양식 .xlsx</a>
+      </div>
 
-      {/* 페이지 1 — 일반위험작업허가서 */}
-      <section className="permit-page">
-        <h1 className="title">일반위험작업 허가서</h1>
-        <table className="t">
-          <tbody>
-            <tr>
-              <th>허가번호</th><td>{data.permitNumber}</td>
-              <th>허가일자</th><td>{fmtDate(data.createdAt)}</td>
-            </tr>
-            <tr>
-              <th>신청인</th>
-              <td>직책 {info.applicantTitle || '—'} / 성명 {info.applicantName} <span className="sign">(서명)</span></td>
-              <th>작업요청 업체</th><td>{data.companyName}</td>
-            </tr>
-            <tr>
-              <th>허가기간</th>
-              <td colSpan={3}>{fmtDateTime(info.workStart)} ~ {fmtDateTime(info.workEnd)}</td>
-            </tr>
-            <tr>
-              <th>작업장소·장치</th>
-              <td colSpan={3}>작업지역: {info.workLocation}{info.equipmentNo ? ` / 장치: ${info.equipmentNo}` : ''}</td>
-            </tr>
-            <tr>
-              <th>작업개요</th>
-              <td colSpan={3}>{info.workContent}</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <div className="sec">보충작업 해당</div>
-        <div className="supp">
-          {SUPPLEMENTAL_WORKS.map((w) => (
-            <span key={w.key} className="supp-item">
-              {supp[w.key] === 'Y' ? '■' : '□'} {w.label}
-            </span>
-          ))}
-        </div>
-
-        <div className="sec">안전조치 요구사항 <span className="muted">(발급자 현장 확인)</span></div>
-        <table className="t small">
-          <tbody>
-            {Array.from({ length: 8 }).map((_, i) => (
-              <tr key={i}>
-                <td className="chk">□ ○</td><td>{left[i]?.label ?? ''}</td>
-                <td className="chk">□ ○</td><td>{right[i]?.label ?? ''}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <div className="sec">가스농도 측정 <span className="muted">(현장 측정·수기)</span></div>
-        <table className="t small"><tbody>
-          <tr><th>가스명</th><th>결과</th><th>측정시간</th><th>측정자/확인자</th></tr>
-          <tr><td>&nbsp;</td><td></td><td></td><td></td></tr>
-          <tr><td>&nbsp;</td><td></td><td></td><td></td></tr>
-        </tbody></table>
-
-        <div className="sec">참여 작업자 / 장비</div>
-        <table className="t small"><tbody>
-          <tr><th>이름</th><th>업체</th><th>구분</th><th>차량/장비</th><th>교육 유효기간</th></tr>
-          {(data.participants ?? []).map((p: any, i: number) => (
-            <tr key={i}>
-              <td>{p.name}</td><td>{p.companyName}</td><td>{p.targetType ?? ''}</td>
-              <td>{p.vehicleNumber || p.spec || ''}</td><td>{fmtDate(p.expiresAt)}</td>
-            </tr>
-          ))}
-        </tbody></table>
-
-        <div className="sec">서명 <span className="muted">(현장 수기)</span></div>
-        <table className="t small"><tbody>
-          <tr><th>발급자</th><td className="sign">(서명)</td><th>승인자</th><td className="sign">(서명)</td></tr>
-          <tr><th>입회자</th><td className="sign">(서명)</td><th>작업부서책임자</th><td className="sign">(서명)</td></tr>
-          <tr><th>작업자(완료)</th><td className="sign" colSpan={3}>(서명)</td></tr>
-        </tbody></table>
-      </section>
-
-      {/* 페이지 2 — TBM */}
-      <section className="permit-page">
+      {/* ① TBM */}
+      <section className="sheet">
         <h1 className="title">작업 전 안전미팅 (TBM)</h1>
         <table className="t"><tbody>
+          <tr><th>일시</th><td>{fmtDateTime(info.workStart)}</td><th>장소</th><td>{info.workLocation}</td></tr>
+          <tr><th>작업명</th><td colSpan={3}>{info.workName}</td></tr>
           <tr>
-            <th>일시</th><td>{fmtDateTime(info.workStart)}</td>
-            <th>날씨</th><td className="muted">(현장)</td>
-          </tr>
-          <tr>
-            <th>장소</th><td>{info.workLocation}</td>
-            <th>작업명</th><td>{info.workName}</td>
-          </tr>
-          <tr>
-            <th>팀장</th><td>소속 {data.companyName} / 성명 {info.applicantName} <span className="sign">(서명)</span></td>
-            <th>안전관리자</th><td className="sign muted">(현장) (서명)</td>
+            <th>작업업체 / 팀장</th>
+            <td>{data.companyName} / {info.applicantName} <Sig sig={tbm.teamLeader?.signature ?? data.applicantSignature} name={info.applicantName} at={data.createdAt} w={120} /></td>
+            <th>안전관리자</th>
+            <td>{tbm.safetyManager?.name || '안전환경'} <Sig sig={tbm.safetyManager?.signature ?? tbm.witness?.signature} name={tbm.safetyManager?.name || '안전환경'} at={tbm.witness?.at} w={120} /></td>
           </tr>
         </tbody></table>
 
-        <div className="sec">작업내용 · 위험요인 · 안전대책 <span className="muted">(현장 작성)</span></div>
+        <div className="sec">작업내용 · 위험요인 · 안전대책</div>
         <table className="t small"><tbody>
-          <tr><th>No</th><th>작업 내용</th><th>위험 요인</th><th>안전 대책</th></tr>
-          {Array.from({ length: 6 }).map((_, i) => (
-            <tr key={i}><td>{i + 1}</td><td></td><td></td><td></td></tr>
+          <tr><th style={{ width: 34 }}>No</th><th>작업 내용</th><th>위험 요인</th><th>안전 대책</th></tr>
+          {Array.from({ length: Math.max(3, (tbm.riskFactors ?? []).length, (tbm.safetyMeasures ?? []).length) }).map((_, i) => (
+            <tr key={i}>
+              <td className="c">{i + 1}</td>
+              <td>{i === 0 ? (tbm.workContent || info.workContent || '') : ''}</td>
+              <td>{(tbm.riskFactors ?? [])[i] ?? ''}</td>
+              <td>{(tbm.safetyMeasures ?? [])[i] ?? ''}</td>
+            </tr>
           ))}
         </tbody></table>
 
-        <div className="sec">작업 전 점검 <span className="muted">(현장)</span></div>
-        <table className="t small"><tbody>
-          <tr><th>점검 항목</th><th>양호</th><th>불량</th></tr>
-          {TBM_CHECKLIST.map((label, i) => (
-            <tr key={i}><td>{label}</td><td>□</td><td>□</td></tr>
-          ))}
+        <table className="t small" style={{ marginTop: 6 }}><tbody>
+          <tr><th style={{ width: 120 }}>오늘의 안전지시사항</th><td>{tbm.safetyInstructions || <span className="muted">(2차 승인 시 입력)</span>}</td></tr>
         </tbody></table>
 
-        <div className="sec">참석자 명단</div>
+        <div className="sec">작업 전 안전점검 <span className="muted">(현장 수기)</span></div>
         <table className="t small"><tbody>
-          <tr><th>성명</th><th>소속</th><th>서명</th></tr>
-          {(data.participants ?? []).map((p: any, i: number) => (
-            <tr key={i}><td>{p.name}</td><td>{p.companyName}</td><td className="sign">(서명)</td></tr>
-          ))}
+          <tr><th>점검 항목</th><th style={{ width: 44 }}>양호</th><th style={{ width: 44 }}>불량</th></tr>
+          {TBM_CHECKLIST.map((label, i) => (<tr key={i}><td>{label}</td><td className="c">□</td><td className="c">□</td></tr>))}
+        </tbody></table>
+
+        <div className="sec">참석자 (확인 서명)</div>
+        <table className="t small"><tbody>
+          <tr><th style={{ width: 34 }}>No</th><th>성명</th><th>소속</th><th style={{ width: '38%' }}>확인 서명</th></tr>
+          {parts.map((pp, i) => {
+            const c = confByName.get((pp.name ?? '').trim());
+            return <tr key={i}><td className="c">{i + 1}</td><td>{pp.name}</td><td>{pp.companyName}</td>
+              <td><Sig sig={c?.signature} name={pp.name} at={c?.at} w={130} /></td></tr>;
+          })}
         </tbody></table>
       </section>
 
-      {/* 보충작업 별지 (1C-3) — 체크된 종류만, 헤더만 자동 / 안전조치·측정·서명은 현장 빈칸 */}
+      {/* ② TBM 현장사진 */}
+      <section className="sheet">
+        <h1 className="title">TBM 현장 사진</h1>
+        {photos.length > 0 ? (
+          <div className="photos">
+            {photos.map((u, i) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img key={i} src={u} alt={`현장사진 ${i + 1}`} className="photo" />
+            ))}
+          </div>
+        ) : (
+          <p className="muted" style={{ textAlign: 'center', padding: '30px 0' }}>현장 사진 없음 — 회사양식 출력본에 현장 부착</p>
+        )}
+      </section>
+
+      {/* ③ 일반위험작업허가서 (마스터) */}
+      <section className="sheet">
+        <div className="master-head">
+          <h1 className="title" style={{ flex: 1 }}>일 반 위 험 작 업 허 가 서</h1>
+          {data.qrDataUrl && <img src={data.qrDataUrl} alt="QR" className="qr" />}
+        </div>
+        <table className="t"><tbody>
+          <tr><th>허가번호</th><td>{data.permitNumber}</td><th>허가일자</th><td>{fmtDate(data.createdAt)}</td></tr>
+          <tr>
+            <th>신청인</th>
+            <td colSpan={3}>직책: {info.applicantTitle || '—'}　성명: {info.applicantName} <Sig sig={data.applicantSignature} name={info.applicantName} at={data.createdAt} w={120} /></td>
+          </tr>
+          <tr><th>허가기간</th><td colSpan={3}>{fmtDateTime(info.workStart)} ~ {fmtDateTime(info.workEnd)} (당일)</td></tr>
+          <tr><th>작업장소·설비</th><td colSpan={3}>[업체] {data.companyName}　작업지역: {info.workLocation}{info.equipmentNo ? `　/ 장치: ${info.equipmentNo}` : ''}</td></tr>
+          <tr><th>작업개요</th><td colSpan={3}>{info.workContent}</td></tr>
+          <tr><th>보충작업</th><td colSpan={3}><div className="supp">{SUPPLEMENTAL_WORKS.map((w) => <span key={w.key}>{supp[w.key] === 'Y' ? '■' : '□'} {w.label}</span>)}</div></td></tr>
+        </tbody></table>
+
+        <div className="sec">안전조치 요구사항 <span className="muted">(발급자 현장 확인·수기)</span></div>
+        <table className="t small"><tbody>
+          {Array.from({ length: 8 }).map((_, i) => (
+            <tr key={i}><td className="c" style={{ width: 30 }}>□</td><td>{left[i]?.label ?? ''}</td><td className="c" style={{ width: 30 }}>□</td><td>{right[i]?.label ?? ''}</td></tr>
+          ))}
+        </tbody></table>
+
+        <div className="sec">안전조치 확인 · 승인 (작업 전)</div>
+        <table className="t small"><tbody>
+          <tr><th style={{ width: '25%' }}>승인자(요청부서)</th><td>{data.approval?.name || ''} <Sig sig={data.approval?.signature} name={data.approval?.name} at={data.approval?.at} w={120} /></td></tr>
+          <tr><th>발급자(안전환경) · 1차</th><td>{data.issuer?.name || ''} <Sig sig={data.issuer?.signature} name={data.issuer?.name} at={data.issuer?.at} w={120} /></td></tr>
+          <tr><th>입회자(안전환경) · 2차</th><td>{tbm.witness?.by || ''} <Sig sig={tbm.witness?.signature} name={tbm.witness?.by} at={tbm.witness?.at} w={120} /></td></tr>
+        </tbody></table>
+
+        <div className="sec">작업완료 확인 (작업 후)</div>
+        <table className="t small"><tbody>
+          <tr><th style={{ width: '25%' }}>완료시간 / 작업자</th><td>{comp.completedAt ? fmtDateTime(comp.completedAt) : ''} / {info.applicantName} <Sig sig={comp.workerSignature} name={info.applicantName} at={comp.completedAt} w={120} /></td></tr>
+          <tr><th>확인자(안전환경)</th><td>{comp.confirmBy || ''} <Sig sig={comp.confirmSignature} name={comp.confirmBy} at={comp.confirmAt} w={120} /></td></tr>
+          {comp.restoreState && <tr><th>복원(조치)상태</th><td>{comp.restoreState}</td></tr>}
+        </tbody></table>
+      </section>
+
+      {/* ④ 체크된 별지 */}
       {suppTypes.map((t) => (
-        <section key={`supp-${t.key}`} className="permit-page">
+        <section key={t.key} className="sheet">
           <h1 className="title">{t.label}작업 허가서</h1>
           <table className="t"><tbody>
-            <tr>
-              <th>허가번호</th><td>{data.permitNumber}</td>
-              <th>허가일자</th><td>{fmtDate(data.createdAt)}</td>
-            </tr>
-            <tr>
-              <th>신청인</th>
-              <td>직책 {info.applicantTitle || '—'} / 성명 {info.applicantName} <span className="sign">(서명)</span></td>
-              <th>작업요청 업체</th><td>{data.companyName}</td>
-            </tr>
-            <tr>
-              <th>허가기간</th>
-              <td colSpan={3}>{fmtDateTime(info.workStart)} ~ {fmtDateTime(info.workEnd)}</td>
-            </tr>
-            <tr>
-              <th>작업장소·장치</th>
-              <td colSpan={3}>작업지역: {info.workLocation}{info.equipmentNo ? ` / 장치: ${info.equipmentNo}` : ''}</td>
-            </tr>
-            <tr>
-              <th>작업개요</th>
-              <td colSpan={3}>[{t.label}] {info.workName} — {info.workContent}</td>
-            </tr>
+            <tr><th>허가번호</th><td>{data.permitNumber}</td><th>허가일자</th><td>{fmtDate(data.createdAt)}</td></tr>
+            <tr><th>신청인</th><td colSpan={3}>직책: {info.applicantTitle || '—'}　성명: {info.applicantName} <Sig sig={data.applicantSignature} name={info.applicantName} at={data.createdAt} w={120} /></td></tr>
+            <tr><th>허가기간</th><td colSpan={3}>{fmtDateTime(info.workStart)} ~ {fmtDateTime(info.workEnd)} (당일)</td></tr>
+            <tr><th>작업개요</th><td colSpan={3}>[{t.label}] {info.workName} — {info.workContent}</td></tr>
           </tbody></table>
-          <p className="muted" style={{ fontSize: 11, margin: '10px 0' }}>
-            ※ {t.label}작업 종류별 안전조치 요구사항 · 가스농도/측정 · 관련 작업허가 체크 · 모든 서명란은
-            회사 양식(.xlsx) 별지에서 <b>현장 직접 작성·서명</b>합니다(앱 미입력).
-          </p>
-          <div className="sec">서명 <span className="muted">(현장 수기)</span></div>
+          <p className="muted note">※ {t.label}작업 안전조치 요구사항 · 가스농도/측정 항목은 회사양식(.xlsx) 별지에서 현장 수기 작성합니다.</p>
+          <div className="sec">현장확인 / 완료</div>
           <table className="t small"><tbody>
-            <tr><th>신청자</th><td className="sign">(서명)</td><th>승인자</th><td className="sign">(서명)</td></tr>
-            <tr><th>안전조치 확인자</th><td className="sign">(서명)</td><th>작업부서책임자</th><td className="sign">(서명)</td></tr>
+            <tr><th style={{ width: '25%' }}>관련부서 현장확인(3차)</th><td>{deptCell(t.key)}</td></tr>
+            <tr><th>작업완료(작업자)</th><td><Sig sig={comp.workerSignature} name={info.applicantName} at={comp.completedAt} w={120} /></td></tr>
           </tbody></table>
         </section>
       ))}
 
-      {/* 필수문서 (1C-2) */}
-      {docs && (docs.pledges ?? []).map((pl: any, i: number) => (
-        <section key={`pledge-${i}`} className="permit-page">
-          <h1 className="title">공사 안전준수 서약서</h1>
-          <table className="t"><tbody>
-            <tr><th>성명</th><td>{pl.name}</td><th>업체명</th><td>{pl.companyName ?? ''}</td></tr>
-            <tr><th>생년월일</th><td>{pl.birthDate ?? ''}</td><th>국적</th><td>{pl.nationality ?? ''}</td></tr>
-            <tr><th>전화번호</th><td>{pl.phone ?? ''}</td><th>혈액형</th><td>{pl.bloodType ?? ''}</td></tr>
-            <tr><th>직종</th><td>{pl.jobType ?? ''}</td><th>출입일자</th><td>{pl.workDate ? fmtDate(pl.workDate) : ''}</td></tr>
-          </tbody></table>
-          <p className="muted" style={{ fontSize: 10, margin: '6px 0' }}>※ 안전준수 서약내용 13개 조항은 회사 양식(.xlsx) 출력본에 포함됩니다.</p>
-          <table className="t small"><tbody>
-            <tr><th style={{ width: '50%' }}>소속</th><th>서약자 (서명)</th></tr>
-            <tr>
-              <td>{pl.companyName ?? ''}</td>
-              <td>
-                {pl.signature
-                  ? <img src={pl.signature} alt="서명" style={{ height: 40, maxWidth: 160 }} />
-                  : <span className="sign">{pl.name} (서명)</span>}
-              </td>
-            </tr>
-          </tbody></table>
-        </section>
-      ))}
-
-      {docs && docs.undertaking && (
-        <section className="permit-page">
-          <h1 className="title">안전작업 이행각서 (업체)</h1>
-          <table className="t"><tbody>
-            <tr><th>소속사명</th><td>{docs.undertaking.companyName ?? ''}</td></tr>
-            <tr><th>작업구역</th><td>{docs.undertaking.workArea ?? ''}</td></tr>
-            <tr><th>출입기간</th><td>{docs.undertaking.issuedAt ? `${fmtDate(docs.undertaking.issuedAt)} ~ ${fmtDate(docs.undertaking.expiresAt)}` : ''}</td></tr>
-            <tr><th>관리감독자</th><td>{docs.undertaking.managerName ?? ''} {docs.undertaking.managerPhone ? `/ ${docs.undertaking.managerPhone}` : ''}</td></tr>
-          </tbody></table>
-          <div className="sec">커버 명단</div>
-          <table className="t small"><tbody>
-            <tr><th>No</th><th>성명</th><th>생년월일</th><th>연락처</th><th>서명</th></tr>
-            {(docs.undertaking.members ?? []).map((m: any, i: number) => (
-              <tr key={i}><td>{i + 1}</td><td>{m.name}</td><td>{m.birthDate ?? ''}</td><td>{m.phone ?? ''}</td><td className="sign">(서명)</td></tr>
-            ))}
-          </tbody></table>
-          <p className="muted" style={{ fontSize: 10, marginTop: 6 }}>소속사 대표 / 현장소장: <span className="sign">(인)</span> — 현장 날인</p>
-        </section>
-      )}
-
-      {docs && docs.eduResult && (docs.eduResult.names ?? []).length > 0 && (
-        <section className="permit-page">
+      {/* ⑤ 교육훈련결과서 */}
+      {docs?.eduResult && (docs.eduResult.names ?? []).length > 0 && (
+        <section className="sheet">
           <h1 className="title">안전 교육 / 훈련 결과서</h1>
           <table className="t"><tbody>
-            <tr><th>교육 일시</th><td>{docs.eduResult.date ? fmtDate(docs.eduResult.date) : ''}</td></tr>
+            <tr><th>교육 일시</th><td>{docs.eduResult.date ? fmtDate(docs.eduResult.date) : fmtDate(info.workStart)}</td></tr>
             <tr><th>교육 내용</th><td>{docs.eduResult.content}</td></tr>
           </tbody></table>
           <div className="sec">교육 대상자</div>
           <table className="t small"><tbody>
-            <tr><th>No</th><th>성명</th><th>서명</th></tr>
+            <tr><th style={{ width: 34 }}>No</th><th>성명</th><th style={{ width: '45%' }}>서명</th></tr>
             {docs.eduResult.names.map((nm: string, i: number) => (
-              <tr key={i}><td>{i + 1}</td><td>{nm}</td><td className="sign">(서명)</td></tr>
+              <tr key={i}><td className="c">{i + 1}</td><td>{nm}</td><td><Sig sig={sigOf(nm)} name={nm} at={data.createdAt} w={130} /></td></tr>
             ))}
           </tbody></table>
-          <p className="muted" style={{ fontSize: 10, marginTop: 6 }}>교육 실시자: <span className="sign">(서명)</span> — 현장</p>
+          <p className="muted note">교육 실시자: {info.applicantName} <Sig sig={data.applicantSignature} name={info.applicantName} at={data.createdAt} w={110} /></p>
         </section>
       )}
 
+      {/* ⑥ 안전준수 서약 (참여자별) */}
+      {pledges.map((pl, i) => (
+        <section key={i} className="sheet">
+          <h1 className="title">공사 안전준수 서약서</h1>
+          <table className="t"><tbody>
+            <tr><th>성명</th><td>{pl.name}</td><th>업체명</th><td>{pl.companyName ?? ''}</td></tr>
+            <tr><th>생년월일</th><td>{pl.birthDate ?? ''}</td><th>연락처</th><td>{pl.phone ?? ''}</td></tr>
+            <tr><th>국적</th><td>{pl.nationality ?? ''}</td><th>혈액형</th><td>{pl.bloodType ?? ''}</td></tr>
+            <tr><th>직종</th><td>{pl.jobType ?? ''}</td><th>출입일자</th><td>{pl.workDate ? fmtDate(pl.workDate) : fmtDate(info.workStart)}</td></tr>
+          </tbody></table>
+          <p className="muted note">※ 안전준수 서약 13개 조항 전문은 회사양식(.xlsx) 출력본에 포함됩니다.</p>
+          <table className="t small"><tbody>
+            <tr><th style={{ width: '50%' }}>소속</th><th>서약자</th></tr>
+            <tr><td>{pl.companyName ?? ''}</td><td><Sig sig={pl.signature} name={pl.name} at={pl.workDate ?? data.createdAt} w={150} /></td></tr>
+          </tbody></table>
+        </section>
+      ))}
+
+      {/* ⑦ 이행각서 */}
+      {docs?.undertaking && (docs.undertaking.members ?? []).length > 0 && (
+        <section className="sheet">
+          <h1 className="title">안전작업 이행각서 (업체)</h1>
+          <table className="t"><tbody>
+            <tr><th>소속사명</th><td>{docs.undertaking.companyName ?? data.companyName}</td><th>작업구역</th><td>{docs.undertaking.workArea ?? info.workLocation}</td></tr>
+            <tr><th>출입기간</th><td>{fmtDate(info.workStart)} (당일)</td><th>관리감독자</th><td>{docs.undertaking.managerName ?? ''}</td></tr>
+          </tbody></table>
+          <div className="sec">명단</div>
+          <table className="t small"><tbody>
+            <tr><th style={{ width: 34 }}>No</th><th>성명</th><th>생년월일</th><th style={{ width: '38%' }}>서명</th></tr>
+            {docs.undertaking.members.map((m: any, i: number) => (
+              <tr key={i}><td className="c">{i + 1}</td><td>{m.name}</td><td>{m.birthDate ?? ''}</td><td><Sig sig={sigOf(m.name)} name={m.name} at={data.createdAt} w={130} /></td></tr>
+            ))}
+          </tbody></table>
+          <p className="muted note">현장소장: {info.applicantName} <Sig sig={data.applicantSignature} name={info.applicantName} at={data.createdAt} w={110} /></p>
+        </section>
+      )}
+
+      {/* 하단 법적 고지 */}
+      <p className="legal">본 화면은 전자 확인용이며, 공식 서식은 회사양식(.xlsx) 출력본입니다.</p>
+
       <style jsx global>{`
-        @page { size: A4; margin: 10mm; }
-        .wp-print { max-width: 800px; margin: 0 auto; padding: 16px; }
-        .permit-page { background: #fff; padding: 16px; margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 8px; }
-        .title { text-align: center; font-size: 18px; font-weight: 800; margin-bottom: 12px; }
-        .sec { font-weight: 700; font-size: 12px; margin: 10px 0 4px; border-left: 3px solid #334155; padding-left: 6px; }
-        .muted { color: #94a3b8; font-weight: 400; }
+        @page { size: A4; margin: 8mm; }
+        .wp-print { max-width: 820px; margin: 0 auto; padding: 12px; color: #111; }
+        .warn { background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; font-size: 12px; padding: 8px 12px; border-radius: 8px; margin-bottom: 10px; }
+        .toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+        .toolbar a, .toolbar button { text-decoration: none; }
+        .sheet { background: #fff; border: 1px solid #000; padding: 14px; margin-bottom: 14px; }
+        .title { text-align: center; font-size: 17px; font-weight: 800; letter-spacing: 1px; margin-bottom: 10px; }
+        .master-head { display: flex; align-items: center; gap: 8px; }
+        .qr { width: 60px; height: 60px; }
+        .sec { font-weight: 700; font-size: 12px; margin: 10px 0 4px; background: #e5e7eb; padding: 3px 6px; }
+        .muted { color: #9ca3af; font-weight: 400; }
+        .note { font-size: 10px; margin: 6px 0; }
         table.t { width: 100%; border-collapse: collapse; font-size: 11px; }
-        table.t th, table.t td { border: 1px solid #cbd5e1; padding: 4px 6px; text-align: left; vertical-align: top; }
-        table.t th { background: #f1f5f9; font-weight: 600; white-space: nowrap; }
+        table.t th, table.t td { border: 1px solid #000; padding: 4px 6px; text-align: left; vertical-align: middle; }
+        table.t th { background: #f3f4f6; font-weight: 600; white-space: nowrap; }
         table.t.small th, table.t.small td { font-size: 10px; padding: 3px 5px; }
-        .chk { white-space: nowrap; width: 36px; }
-        .sign { color: #94a3b8; }
-        .supp { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; padding: 4px 0; }
-        .supp-item { white-space: nowrap; }
-        @media screen { .wp-print { background: #f8fafc; } }
+        .c { text-align: center; }
+        .supp { display: flex; flex-wrap: wrap; gap: 10px; }
+        .sigwrap { position: relative; display: inline-block; vertical-align: middle; }
+        .sigimg { display: block; background: #fff; }
+        .siglog { position: absolute; right: 0; bottom: -9px; font-size: 8px; color: #9ca3af; white-space: nowrap; }
+        .sigph { color: #cbd5e1; font-size: 10px; }
+        .photos { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+        .photo { max-width: 100%; border: 1px solid #d1d5db; }
+        .legal { text-align: center; font-size: 11px; color: #6b7280; margin: 16px 0; }
+        @media screen and (max-width: 640px) {
+          .wp-print { padding: 8px; }
+          .sheet { transform: scale(1); }
+          table.t { font-size: 10px; }
+        }
         @media print {
           .no-print { display: none !important; }
-          .wp-print { padding: 0; max-width: 100%; }
-          .permit-page { border: none; border-radius: 0; margin: 0; page-break-after: always; }
+          .wp-print { max-width: 100%; padding: 0; }
+          .sheet { border: none; padding: 4px 0; margin: 0; page-break-after: always; }
+          .warn { page-break-after: avoid; }
+          .siglog { color: #9ca3af; }
         }
       `}</style>
     </main>

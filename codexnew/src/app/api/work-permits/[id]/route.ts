@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { getDocsForOutput } from '@/lib/safety-doc-status';
 import { stageFromRow } from '@/lib/work-permit-stage';
 import { resolveSignerLabels } from '@/lib/work-permit-signer';
+import QRCode from 'qrcode';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic'; // ⚠️ 캐시 금지 — 재서명/종료확인 즉시 반영
@@ -99,6 +100,25 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     safeDept[k] = { ...vv, by: lab(vv.by), name: vv.name || lab(vv.by) };
   }
 
+  // QR(허가번호+검증 URL) — print 화면 헤더용
+  let qrDataUrl: string | null = null;
+  try {
+    const base = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ?? '';
+    const verifyUrl = base ? `${base}/work-permit/print/${permit.id}` : `WP:${permit.permit_number}`;
+    qrDataUrl = await QRCode.toDataURL(verifyUrl, { margin: 1, width: 200 });
+  } catch (e) {
+    console.error('[work-permits/:id] qr:', e);
+  }
+
+  // TBM 현장 사진 signed URL(비공개 버킷 → 10분 임시) — print 화면 표시용
+  const tbmPhotoUrls: string[] = [];
+  for (const p of Array.isArray(tbmObj.photos) ? tbmObj.photos : []) {
+    try {
+      const { data: signed } = await supabase.storage.from('work-permit-photos').createSignedUrl(p, 600);
+      if (signed?.signedUrl) tbmPhotoUrls.push(signed.signedUrl);
+    } catch { /* */ }
+  }
+
   // 1C-2 필수문서 데이터(인쇄 첨부용)
   let docs = null;
   try {
@@ -153,6 +173,8 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       deptConfirmations: safeDept,
       startedBy: lab(permit.started_by),
       startedAt: permit.started_at ?? null,
+      qrDataUrl,
+      tbmPhotoUrls,
       participants: (parts ?? []).map((p: any) => ({
         name: p.name,
         companyName: p.company_name,
