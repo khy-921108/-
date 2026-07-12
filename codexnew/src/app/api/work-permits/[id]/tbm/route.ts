@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { normalizePhone } from '@/lib/equipment';
 import { sendSms } from '@/lib/sms';
+import { isValidSignature, isValidPhoto, MAX_PHOTO_BYTES } from '@/lib/upload-validate';
 
 export const runtime = 'nodejs';
 export const fetchCache = 'force-no-store';
@@ -124,15 +125,17 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   // ── photo: 사진 1장 업로드 ──
   if (action === 'photo') {
     const image = (body?.image ?? '').toString();
-    const m = image.match(/^data:image\/(\w+);base64,(.+)$/);
-    if (!m) return NextResponse.json({ success: false, code: 'BAD_IMAGE', message: '이미지 형식이 올바르지 않습니다.' }, { status: 400 });
+    // 보안검토②: png/jpeg/webp만 허용(svg 등 차단) + 장수·용량 상한.
+    if (!isValidPhoto(image)) return NextResponse.json({ success: false, code: 'BAD_IMAGE', message: '지원하지 않는 이미지 형식입니다(PNG·JPG·WEBP만 허용).' }, { status: 400 });
     if (photos.length >= 2) return NextResponse.json({ success: false, code: 'PHOTO_FULL', message: '사진은 최대 2장까지입니다.' }, { status: 409 });
+    const m = image.match(/^data:image\/(png|jpe?g|webp);base64,(.+)$/)!;
+    const mime = m[1] === 'jpg' ? 'jpeg' : m[1];
     const buf = Buffer.from(m[2], 'base64');
-    if (buf.length > 1.5 * 1024 * 1024) return NextResponse.json({ success: false, code: 'TOO_LARGE', message: '사진 용량이 큽니다(리사이즈 후 업로드).' }, { status: 413 });
-    const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+    if (buf.length > MAX_PHOTO_BYTES) return NextResponse.json({ success: false, code: 'TOO_LARGE', message: '사진 용량이 큽니다(5MB 이하로 업로드).' }, { status: 413 });
+    const ext = mime === 'jpeg' ? 'jpg' : mime;
     const key = `permits/${permitId}/tbm-${Date.now()}.${ext}`;
     const { error: upErr } = await withTimeout(
-      supabase.storage.from('work-permit-photos').upload(key, buf, { contentType: `image/${m[1]}`, upsert: true }),
+      supabase.storage.from('work-permit-photos').upload(key, buf, { contentType: `image/${mime}`, upsert: true }),
       'upload'
     );
     if (upErr) {
@@ -149,7 +152,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   if (action === 'confirm') {
     const target = (body?.participantName ?? '').toString().trim();
     const signature = (body?.signature ?? '').toString();
-    if (!signature.startsWith('data:image/')) return NextResponse.json({ success: false, code: 'NO_SIGNATURE', message: '서명을 입력해 주세요.' }, { status: 400 });
+    if (!isValidSignature(signature)) return NextResponse.json({ success: false, code: 'NO_SIGNATURE', message: '서명이 올바르지 않습니다(PNG 서명 필요).' }, { status: 400 });
     const p = (parts ?? []).find((x: any) => (x.name ?? '').trim() === target);
     if (!p) return NextResponse.json({ success: false, code: 'NOT_PARTICIPANT', message: '참여자 명단에 없는 사람입니다.' }, { status: 400 });
     const norm = normalizePhone(p.phone);

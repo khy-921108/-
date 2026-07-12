@@ -163,6 +163,17 @@ export default function AdminWorkPermitDetailPage() {
   const started = !!data.startedAt || !!comp.confirmSignature;
   const closed = !!comp.confirmSignature;
 
+  // 보안검토①: 작업일(KST)이 지난 허가서는 승인·개시 버튼을 감춘다(서버도 차단). 종료·되돌리기는 허용.
+  const isPast = (() => {
+    if (!info.workEnd) return false;
+    const p = (n: number) => String(n).padStart(2, '0');
+    const d = new Date(new Date(info.workEnd).getTime() + 9 * 60 * 60 * 1000);
+    const we = `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+    const n = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const today = `${n.getUTCFullYear()}-${p(n.getUTCMonth() + 1)}-${p(n.getUTCDate())}`;
+    return we < today;
+  })();
+
   // R-6 ③-4: 서명자 이메일 → "부서 이름 직책" 라벨(미등록이면 이메일 앞부분)
   const signerLabels: Record<string, string> = data.signerLabels ?? {};
   const slabel = (email?: string | null) =>
@@ -401,16 +412,16 @@ export default function AdminWorkPermitDetailPage() {
         <SigRow label="신청인" sub="TBM 팀장 겸용" signature={data.applicantSignature} who={info.applicantName} at={data.createdAt} />
         <SigRow label="안전관리자" sub="TBM 확인" signature={tbm.safetyManager?.signature} who={tbm.safetyManager?.name} />
         <SigRow label="발급 (1차)" sub="안전환경" signature={data.issuer?.signature} who={slabel(data.issuer?.name)} at={data.issuer?.at}
-          action={(hasApprove && !started) || rbShow('issuer') ? (
+          action={(hasApprove && !started && !isPast) || rbShow('issuer') ? (
             <div className="flex items-center gap-1.5 flex-wrap justify-end">
-              {hasApprove && !started && btn(issuerSigned ? '재서명' : '1차 승인', () => { if (issuerSigned && !confirm('발급 서명을 다시 하면 덮어씁니다. 계속할까요?')) return; openModal({ type: 'issue' }); })}
+              {hasApprove && !started && !isPast && btn(issuerSigned ? '재서명' : '1차 승인', () => { if (issuerSigned && !confirm('발급 서명을 다시 하면 덮어씁니다. 계속할까요?')) return; openModal({ type: 'issue' }); })}
               {rbShow('issuer') && rbBtn({ step: 'issuer', label: '1차 발급' })}
             </div>
           ) : null} />
         <SigRow label="입회 (2차)" sub="안전환경 현장입회" signature={witness?.signature} who={slabel(witness?.by)} at={witness?.at}
-          action={(hasApprove && !started) || rbShow('witness') ? (
+          action={(hasApprove && !started && !isPast) || rbShow('witness') ? (
             <div className="flex items-center gap-1.5 flex-wrap justify-end">
-              {hasApprove && !started && (issuerSigned
+              {hasApprove && !started && !isPast && (issuerSigned
                 ? btn(witnessSigned ? '재서명' : '2차 승인', startWitness)
                 : <span className="text-[11px] text-slate-400">1차 후 가능</span>)}
               {rbShow('witness') && rbBtn({ step: 'witness', label: '2차 입회' })}
@@ -429,7 +440,7 @@ export default function AdminWorkPermitDetailPage() {
             const done = !!dc?.signature;
             const proxy = dc?.mode === 'EMERGENCY_PROXY';
             let action: React.ReactNode = null;
-            if (!started) {
+            if (!started && !isPast) {
               if (dept === '안전환경' && hasApprove) {
                 action = btn(done ? '재확인' : '확인 서명', () => { if (done && !confirm('다시 확인하면 덮어씁니다.')) return; openModal({ type: 'dept', supKey: w.key, label: w.label, dept }); });
               } else if (dept === '공무') {
@@ -483,7 +494,7 @@ export default function AdminWorkPermitDetailPage() {
                 ? <p className="text-xs text-slate-500 mt-0.5">모든 확인 완료 — 개시 가능</p>
                 : <p className="text-xs text-amber-600 mt-0.5">차단: {startMissing.join(', ')} 미완료</p>}
           </div>
-          {hasApprove && !started && (
+          {hasApprove && !started && !isPast && (
             <button onClick={startWork} disabled={!canStart}
               className={`text-sm px-4 py-2 rounded-lg font-bold ${canStart ? 'btn-primary' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}>
               작업 개시 승인

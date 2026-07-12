@@ -7,6 +7,7 @@ import {
   supplementalLabel,
   type SupplementalKey,
 } from '@/lib/work-permit-constants';
+import { isValidSignature } from '@/lib/upload-validate';
 
 export const runtime = 'nodejs';
 export const fetchCache = 'force-no-store';
@@ -55,8 +56,8 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   const action = body?.action;
   const signature = typeof body?.signature === 'string' ? body.signature : '';
   const needSig = action !== 'start_work' && action !== 'rollback'; // 되돌리기·개시는 서명 없음
-  if (needSig && !signature.startsWith('data:image/')) {
-    return NextResponse.json({ success: false, code: 'NO_SIGNATURE', message: '서명이 필요합니다.' }, { status: 400 });
+  if (needSig && !isValidSignature(signature)) {
+    return NextResponse.json({ success: false, code: 'NO_SIGNATURE', message: '서명이 올바르지 않습니다(PNG 서명 필요).' }, { status: 400 });
   }
 
   const supabase = createServiceClient();
@@ -74,7 +75,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   const { data: permit, error: readErr } = await withTimeout(
     supabase
       .from('work_permits')
-      .select('id, status, supplemental, issuer_signature, tbm, dept_confirmations, completion, approved_by, started_at, rollback_logs')
+      .select('id, status, supplemental, issuer_signature, tbm, dept_confirmations, completion, approved_by, started_at, rollback_logs, work_end')
       .eq('id', ctx.params.id)
       .maybeSingle(),
     'select'
@@ -93,6 +94,20 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     NextResponse.json({ success: false, code: 'FORBIDDEN', message: '이 작업에 대한 권한이 없습니다.' }, { status: 403 });
   const fail = (code: string, message: string, status = 400) =>
     NextResponse.json({ success: false, code, message }, { status });
+
+  // 외부 보안검토①: 작업일(KST)이 지난 허가서는 승인·개시 차단(마감·정정=종료/되돌리기는 허용).
+  if (['issue', 'witness', 'dept_confirm', 'dept_proxy', 'start_work'].includes(action)) {
+    const p2 = (n: number) => String(n).padStart(2, '0');
+    const kstYmd = (ms: number) => {
+      const k = new Date(ms + 9 * 60 * 60 * 1000);
+      return `${k.getUTCFullYear()}-${p2(k.getUTCMonth() + 1)}-${p2(k.getUTCDate())}`;
+    };
+    const today = kstYmd(Date.now());
+    const workDay = permit.work_end ? kstYmd(new Date(permit.work_end).getTime()) : '';
+    if (workDay && workDay < today) {
+      return fail('WORK_DAY_PASSED', '작업일이 지난 허가서입니다. 새로 신청해 주세요.', 400);
+    }
+  }
 
   // ===== ③-2a =====
   if (action === 'issue') {

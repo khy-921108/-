@@ -10,6 +10,7 @@
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { sendSms } from '@/lib/sms';
+import { isValidSignature } from '@/lib/upload-validate';
 
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store'; // 상태 재조회 캐시 방지(중복 처리 방지)
@@ -30,8 +31,8 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     return NextResponse.json({ error: 'INVALID_ACTION' }, { status: 400 });
   }
   // B안: 승인 = 1차 발급(손서명 필수). 서명 없는 APPROVE 거부(반쪽 승인 방지).
-  if (action === 'APPROVE' && !signature.startsWith('data:image/')) {
-    return NextResponse.json({ error: 'SIGNATURE_REQUIRED', message: '승인하려면 손서명이 필요합니다.' }, { status: 400 });
+  if (action === 'APPROVE' && !isValidSignature(signature)) {
+    return NextResponse.json({ error: 'SIGNATURE_REQUIRED', message: '승인하려면 손서명(PNG)이 필요합니다.' }, { status: 400 });
   }
 
   const supabase = createServiceClient();

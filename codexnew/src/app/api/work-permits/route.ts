@@ -5,6 +5,7 @@ import { generateWorkPermitNumber } from '@/lib/work-permit-number';
 import { SUPPLEMENTAL_KEYS } from '@/lib/work-permit-constants';
 import { evaluateRequiredDocs } from '@/lib/safety-doc-status';
 import { sendSms } from '@/lib/sms';
+import { isValidSignature, isValidPhoto } from '@/lib/upload-validate';
 
 export const runtime = 'nodejs';
 
@@ -30,14 +31,13 @@ export async function POST(req: Request) {
     const tbmDetailIn = body.tbmDetail ?? {};
     const signaturesIn = body.signatures ?? {};
     const photosIn: string[] = Array.isArray(body.photos) ? body.photos : [];
-    const isDataUrl = (v: any): v is string => typeof v === 'string' && v.startsWith('data:image/');
     const approverName = (approvalIn.approverName ?? '').trim() || null;
     const approverTitle = (approvalIn.approverTitle ?? '').trim() || null;
     const approvalMode = approvalIn.approvalMode === 'SITE' || approvalIn.approvalMode === 'REMOTE'
       ? approvalIn.approvalMode
       : null;
-    const applicantSignature = isDataUrl(signaturesIn.applicant) ? signaturesIn.applicant : null;
-    const safetyManagerSignature = isDataUrl(signaturesIn.safetyManager) ? signaturesIn.safetyManager : null;
+    const applicantSignature = isValidSignature(signaturesIn.applicant) ? signaturesIn.applicant : null;
+    const safetyManagerSignature = isValidSignature(signaturesIn.safetyManager) ? signaturesIn.safetyManager : null;
     const asStrArray = (v: any): string[] =>
       Array.isArray(v) ? v.map((x) => (x ?? '').toString()).filter((s) => s.trim()) : [];
 
@@ -214,7 +214,7 @@ export async function POST(req: Request) {
       // 사진은 Storage 업로드 후 경로로 채운다(아래). 초기엔 빈 배열.
       photos: [] as string[],
     };
-    const photoDataUrls = photosIn.filter(isDataUrl).slice(0, 2);
+    const photoDataUrls = photosIn.filter(isValidPhoto).slice(0, 2);
 
     // ---- 6. 신청번호 RPC + 충돌 재시도(≤3) → work_permits INSERT ----
     let permit: any = null;

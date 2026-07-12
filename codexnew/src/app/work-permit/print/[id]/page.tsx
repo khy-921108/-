@@ -106,6 +106,23 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
 
   return (
     <main className="wp-print">
+      {/* 보안검토③: 현재 상태 배너 — 옛 종이 인쇄물 QR 스캔 시 "지금 유효한지" 즉시 확인 */}
+      {(() => {
+        const s = data.stage;
+        if (!s) return null;
+        const map: Record<string, { bg: string; fg: string; text: string }> = {
+          OVERDUE: { bg: '#dc2626', fg: '#ffffff', text: '🔴 미종료 — 종료확인 필요' },
+          EXPIRED: { bg: '#e2e8f0', fg: '#475569', text: '⚪ 기간 경과' },
+          CLOSED: { bg: '#dcfce7', fg: '#15803d', text: '✅ 작업종료' },
+          REJECTED: { bg: '#fee2e2', fg: '#b91c1c', text: '⛔ 반려' },
+        };
+        const m = map[s.key] ?? { bg: '#dbeafe', fg: '#1d4ed8', text: `진행 중 — ${s.label}` };
+        return (
+          <div style={{ background: m.bg, color: m.fg, fontWeight: 800, fontSize: '15px', textAlign: 'center', padding: '9px 12px', borderRadius: 8, margin: '0 0 8px' }}>
+            현재 상태: {m.text}
+          </div>
+        );
+      })()}
       <div className="warn">⚠️ 이 화면은 개인정보(성명·연락처·생년월일)와 서명이 포함된 <b>작업허가 확인용</b> 문서입니다. 무단 열람·유출을 금합니다.</div>
       <div className="no-print toolbar">
         <button onClick={() => window.print()} className="btn-primary">🖨 인쇄</button>
