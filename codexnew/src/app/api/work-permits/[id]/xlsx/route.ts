@@ -101,8 +101,9 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
   }
   let qrDataUrl: string | null = null;
   try {
-    const base = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ?? '';
-    const verifyUrl = base ? `${base}/work-permit/print/${permit.id}` : `WP:${permit.permit_number}`;
+    // QR = 완전한 인쇄 페이지 주소(스캔 즉시 브라우저로 열림). env 없으면 운영 도메인 하드 폴백.
+    const base = (process.env.NEXT_PUBLIC_SITE_URL || 'https://safety-edu.vercel.app').replace(/\/$/, '');
+    const verifyUrl = `${base}/work-permit/print/${permit.id}`;
     qrDataUrl = await QRCode.toDataURL(verifyUrl, { margin: 1, width: 220 });
   } catch (e) {
     console.error('[work-permits/:id/xlsx] qr:', e);

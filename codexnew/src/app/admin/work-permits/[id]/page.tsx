@@ -48,10 +48,17 @@ function SigRow({ label, sub, signature, who, at, pending, action }: {
       </div>
       {signed ? (
         <>
-          <img src={signature!} alt="서명" className="h-9 border border-slate-200 rounded bg-white px-1" />
-          <div className="text-xs text-slate-600 min-w-0">
-            {who && <span className="font-medium break-all">{who}</span>}
-            {at && <span className="text-slate-400"> · {fmtDateTime(at)}</span>}
+          <img src={signature!} alt="서명" className="h-9 border border-slate-200 rounded bg-white px-1 shrink-0" />
+          <div className="text-xs text-slate-600 min-w-0 flex items-baseline gap-1">
+            {who ? (
+              <span className="font-medium truncate">{who}</span>
+            ) : (
+              <span
+                className="text-slate-400 italic whitespace-nowrap cursor-help"
+                title="내 정보에서 부서·이름·직책을 등록하세요."
+              >(정보 미등록)</span>
+            )}
+            {at && <span className="text-slate-400 whitespace-nowrap shrink-0"> · {fmtDateTime(at)}</span>}
           </div>
         </>
       ) : (
@@ -175,9 +182,8 @@ export default function AdminWorkPermitDetailPage() {
   })();
 
   // R-6 ③-4: 서명자 이메일 → "부서 이름 직책" 라벨(미등록이면 이메일 앞부분)
-  const signerLabels: Record<string, string> = data.signerLabels ?? {};
-  const slabel = (email?: string | null) =>
-    email ? (signerLabels[email.toLowerCase()] || email.split('@')[0]) : '';
+  // GET가 이미 "부서 이름 직책"으로 변환(미등록이면 null)해 주므로 그대로 통과. 빈값은 null.
+  const slabel = (v?: string | null) => (v && String(v).trim() ? v : null);
 
   const resetFields = () => { setSig(''); setTitle(''); setInstructions(tbm.safetyInstructions ?? ''); setReason(''); setRestoreState(comp.restoreState ?? ''); setCompletedAt(''); setModalErr(''); };
   const openModal = (m: ModalState) => { resetFields(); setModal(m); };
@@ -261,7 +267,7 @@ export default function AdminWorkPermitDetailPage() {
   };
   const rbBtn = (t: { step: 'issuer' | 'witness' | 'dept'; supKey?: string; label: string }) => (
     <button onClick={() => openRollback(t)}
-      className="text-xs px-2.5 py-1.5 rounded-lg font-bold border border-red-300 text-red-600 hover:bg-red-50 whitespace-nowrap">
+      className="shrink-0 whitespace-nowrap text-xs px-2.5 py-1.5 rounded-lg font-bold border border-red-300 text-red-600 hover:bg-red-50">
       ↩ 이전 단계로 되돌리기
     </button>
   );
@@ -463,7 +469,9 @@ export default function AdminWorkPermitDetailPage() {
                     <div className="text-xs text-slate-600 min-w-0">
                       {proxy
                         ? <span className="text-amber-700 font-bold">긴급대리(안전환경)</span>
-                        : <span className="font-medium break-all">{dc.name || slabel(dc.by)}</span>}
+                        : (dc.name || slabel(dc.by))
+                          ? <span className="font-medium truncate">{dc.name || slabel(dc.by)}</span>
+                          : <span className="text-slate-400 italic whitespace-nowrap cursor-help" title="내 정보에서 부서·이름·직책을 등록하세요.">(정보 미등록)</span>}
                       {dc.at && <span className="text-slate-400"> · {fmtDateTime(dc.at)}</span>}
                       {proxy && dc.reason && <p className="text-[11px] text-amber-600">사유: {dc.reason}</p>}
                     </div>
@@ -553,7 +561,7 @@ export default function AdminWorkPermitDetailPage() {
             <div className="flex gap-2 justify-end pt-1">
               <button className="btn-secondary" onClick={() => setRbModal(null)} disabled={rbSaving}>취소</button>
               <button
-                className="text-sm px-4 py-2 rounded-lg font-bold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                className="whitespace-nowrap text-sm px-5 py-2 rounded-lg font-bold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
                 onClick={submitRollback} disabled={rbSaving}
               >{rbSaving ? '처리 중…' : '되돌리기'}</button>
             </div>
