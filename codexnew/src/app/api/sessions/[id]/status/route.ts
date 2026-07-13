@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 /**
  * GET /api/sessions/:id/status

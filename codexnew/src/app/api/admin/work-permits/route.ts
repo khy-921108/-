@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getSignatureStatusForPermits } from '@/lib/safety-doc-status';
-import { stageFromLightRow } from '@/lib/work-permit-stage';
+import { stageFromRow } from '@/lib/work-permit-stage';
 
 // 목록은 승인·되돌리기로 수시 변하므로 라우트 캐시 금지(과거 stale 캐시 버그 재발 방지 원칙).
 export const dynamic = 'force-dynamic';
@@ -27,7 +27,7 @@ export async function GET(req: Request) {
     .select(
       `id, permit_number, permit_type, request_company_name, work_name, work_start, work_end,
        applicant_name, supplemental, status, approved_by, approved_at, created_at,
-       issuer_signature, started_at, completion`
+       issuer_signature, started_at, completion, tbm, dept_confirmations`
     )
     .order('work_start', { ascending: false })
     .limit(500);
@@ -96,7 +96,7 @@ export async function GET(req: Request) {
       participantCount: countMap.get(p.id) ?? 0,
       supplemental: p.supplemental ?? {},
       status: p.status,
-      stage: stageFromLightRow(p, now), // R-6 진행단계(목록 경량뱃지) — 무거운 서명 blob 조회 회피
+      stage: stageFromRow(p, now), // R-6 진행단계(full-stage — 3분류 탭·상세·업체·포털·print와 동일 판정)
       approvedBy: p.approved_by ?? null,
       approvedAt: p.approved_at ?? null,
       createdAt: p.created_at,

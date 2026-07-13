@@ -162,8 +162,9 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
         <div className="sec">참석자 (확인 서명)</div>
         <table className="t small"><tbody>
           <tr><th style={{ width: 30 }}>No</th><th>성명</th><th>소속</th><th style={{ width: '40%' }}>확인 서명</th></tr>
-          {parts.map((pp, i) => { const c = confByName.get((pp.name ?? '').trim());
-            return <tr key={i}><td className="c">{i + 1}</td><td>{pp.name}</td><td>{pp.companyName}</td><td><SigCell sig={c?.signature} name={pp.name} at={c?.at} /></td></tr>; })}
+          {parts.map((pp: any, i: number) => (
+            <tr key={i}><td className="c">{i + 1}</td><td>{pp.name}</td><td>{pp.companyName}</td><td><SigCell sig={pp.tbmSignature} name={pp.name} at={pp.tbmConfirmedAt} /></td></tr>
+          ))}
         </tbody></table>
       </section>
 

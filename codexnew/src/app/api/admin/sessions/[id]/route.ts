@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 /**
  * DELETE /api/admin/sessions/:id

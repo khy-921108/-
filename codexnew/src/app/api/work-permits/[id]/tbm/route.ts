@@ -53,7 +53,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   const { data: permit, error } = await withTimeout(
     supabase
       .from('work_permits')
-      .select('id, permit_number, work_name, status, applicant_name, applicant_birth_date, applicant_phone, issuer_signature, tbm')
+      .select('id, permit_number, work_name, status, applicant_name, applicant_birth_date, applicant_phone, issuer_signature, tbm, started_at, work_end')
       .eq('id', permitId)
       .maybeSingle(),
     'select'
@@ -168,6 +168,21 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
 
   // ── submit: 제출 표식 + 안전환경 알림 ──
   if (action === 'submit') {
+    // ③: 빈 TBM 제출 차단(프론트 우회 방지) — 사진 ≥1 + 참여자 전원 서명 + 개시 전 + 작업일 이내.
+    if (permit.started_at) {
+      return NextResponse.json({ success: false, code: 'ALREADY_STARTED', message: '이미 작업이 개시되어 TBM 제출을 할 수 없습니다.' }, { status: 409 });
+    }
+    const p2 = (n: number) => String(n).padStart(2, '0');
+    const kstYmd = (ms: number) => { const k = new Date(ms + 9 * 3600 * 1000); return `${k.getUTCFullYear()}-${p2(k.getUTCMonth() + 1)}-${p2(k.getUTCDate())}`; };
+    if (permit.work_end && kstYmd(new Date(permit.work_end).getTime()) < kstYmd(Date.now())) {
+      return NextResponse.json({ success: false, code: 'WORK_DAY_PASSED', message: '작업일이 지난 허가서입니다. 새로 신청해 주세요.' }, { status: 400 });
+    }
+    const isSig = (s: any) => !!(s && String(s).startsWith('data:image/'));
+    const signedCount = Object.values(confirmations).filter((c: any) => isSig(c?.signature)).length;
+    const total = (parts ?? []).length;
+    if (photos.length < 1 || signedCount < total) {
+      return NextResponse.json({ success: false, code: 'TBM_INCOMPLETE', message: `TBM 미완료: 사진 ${photos.length}/1, 서명 ${signedCount}/${total}명` }, { status: 400 });
+    }
     const alreadySubmitted = !!tbm.tbmSubmittedAt; // 이미 제출됨 → 문자 재발송 금지(감사 발견3)
     const nextTbm = { ...tbm, tbmSubmittedAt: tbm.tbmSubmittedAt ?? new Date().toISOString(), tbmSubmittedBy: name };
     const { error: sErr } = await withTimeout(supabase.from('work_permits').update({ tbm: nextTbm }).eq('id', permitId), 'submit-save');

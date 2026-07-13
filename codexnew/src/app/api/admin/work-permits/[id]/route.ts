@@ -75,7 +75,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   const { data: permit, error: readErr } = await withTimeout(
     supabase
       .from('work_permits')
-      .select('id, status, supplemental, issuer_signature, tbm, dept_confirmations, completion, approved_by, started_at, rollback_logs, work_end')
+      .select('id, status, supplemental, issuer_signature, tbm, dept_confirmations, completion, approved_by, started_at, rollback_logs, work_end, equipment')
       .eq('id', ctx.params.id)
       .maybeSingle(),
     'select'
@@ -94,6 +94,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     NextResponse.json({ success: false, code: 'FORBIDDEN', message: '이 작업에 대한 권한이 없습니다.' }, { status: 403 });
   const fail = (code: string, message: string, status = 400) =>
     NextResponse.json({ success: false, code, message }, { status });
+  const isSig = (s: any) => !!(s && String(s).startsWith('data:image/'));
 
   // 외부 보안검토①: 작업일(KST)이 지난 허가서는 승인·개시 차단(마감·정정=종료/되돌리기는 허용).
   if (['issue', 'witness', 'dept_confirm', 'dept_proxy', 'start_work'].includes(action)) {
@@ -176,6 +177,8 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   // ===== ③-2b : 종료 2단계 =====
   if (action === 'complete_report') {
     if (!hasApprove) return forbidden();
+    // ①: 개시 전 종료신고 금지. (개시됐고 날짜만 지난 미종료 마감은 started_at 있으므로 통과)
+    if (!permit.started_at) return fail('NOT_STARTED', '작업 개시 후 종료신고가 가능합니다.', 409);
     const comp = (permit.completion ?? {}) as Record<string, any>;
     const completedAt = typeof body?.completedAt === 'string' && body.completedAt ? body.completedAt : now;
     comp.completedAt = completedAt;
@@ -203,6 +206,11 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   // ===== ③-2b : 작업개시 최종승인(게이트) =====
   if (action === 'start_work') {
     if (!hasApprove) return forbidden();
+    // ①: 이미 개시/완료면 거부(중복 개시·덮어쓰기 방지)
+    const comp0 = (permit.completion ?? {}) as Record<string, any>;
+    if (permit.started_at || permit.status === 'COMPLETED' || isSig(comp0.confirmSignature)) {
+      return fail('ALREADY_STARTED', '이미 작업이 개시되었거나 종료된 허가서입니다.', 409);
+    }
     const tbm = (permit.tbm ?? {}) as Record<string, any>;
     const confs = (permit.dept_confirmations ?? {}) as Record<string, any>;
     const supp = (permit.supplemental ?? {}) as Record<string, string>;
@@ -216,11 +224,21 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
         missing.push(`${supplementalLabel(key)} 별지 ${dept} 현장확인`);
       }
     }
+    // ②: 중장비 허가서인데 장비 정보 없으면 개시 차단
+    if (supp.heavy === 'Y' && !(Array.isArray(permit.equipment) && permit.equipment.length > 0)) {
+      missing.push('중장비 장비 정보');
+    }
     if (missing.length > 0) {
       return fail('GATE_BLOCKED', `작업개시 차단 — 미완료: ${missing.join(', ')}`, 409);
     }
-    const { error } = await patchPermit({ status: 'APPROVED', started_by: actor, started_at: now });
+    // 조건부 업데이트(동시요청 경합 방지): started_at 이 null 일 때만 성공.
+    const { data: upd, error } = (await withTimeout(
+      supabase.from('work_permits').update({ status: 'APPROVED', started_by: actor, started_at: now })
+        .eq('id', ctx.params.id).is('started_at', null).select('id'),
+      'start-update'
+    )) as { data: any[] | null; error: any };
     if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
+    if (!upd || upd.length === 0) return fail('ALREADY_STARTED', '이미 개시된 허가서입니다(동시 처리).', 409);
     return NextResponse.json({ success: true, data: { action, by: actor, at: now, status: 'APPROVED' } });
   }
 

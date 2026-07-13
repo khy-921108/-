@@ -38,6 +38,7 @@ export async function GET(req: Request) {
   const { data: permits, error } = await supabase
     .from('work_permits')
     .select('id, permit_number, request_company_name, supplemental, status, work_start, work_end, issuer_signature, tbm, dept_confirmations, started_at, completion')
+    .neq('status', 'REJECTED') // 반려 건은 진행 중으로 잡히지 않게
     .lte('work_start', todayEnd)
     .gte('work_end', todayStart)
     .order('work_start', { ascending: true })

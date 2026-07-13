@@ -177,6 +177,13 @@ export async function POST(req: Request) {
       .filter((e: any) => e.type || e.vehicleNumber)
       .slice(0, 20)
       .map((e: any) => ({ ...e, matched: !!normPlate(e.vehicleNumber) && heavyPlates.includes(normPlate(e.vehicleNumber)) }));
+    // ②: 중장비 체크인데 장비 정보가 하나도 없으면 거부(프론트 우회 방지).
+    if (heavyChecked && equipment.length === 0) {
+      return NextResponse.json(
+        { success: false, code: 'NO_EQUIPMENT', message: '중장비 작업은 장비 정보(종류·차량번호)를 1개 이상 입력해야 합니다.' },
+        { status: 400 }
+      );
+    }
 
     // ---- 3.5 필수서류(1C-2) 서버 재검증 (작업종료일 기준) ----
     //  각 참여자 유효 개인서약 + 업체 유효 이행각서(모든 참여자 커버). 클라 'docs 완료' 불신.

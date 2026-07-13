@@ -135,8 +135,6 @@ export default function AdminWorkPermitDetailPage() {
   const tbm = data.tbm ?? {};
   const comp = data.completion ?? {};
   const deptConfs: Record<string, any> = data.deptConfirmations ?? {};
-  const confs: Conf[] = Object.values(tbm.confirmations ?? {});
-  const confByName = new Map(confs.map((c) => [(c.name ?? '').trim(), c]));
   const pledgeSigByName = new Map<string, boolean>(
     (data.docs?.pledges ?? []).map((p: any) => [(p.name ?? '').trim(), !!p.signature])
   );
@@ -144,7 +142,7 @@ export default function AdminWorkPermitDetailPage() {
   const participants: any[] = data.participants ?? [];
   const photoCount = Array.isArray(tbm.photos) ? tbm.photos.length : 0;
   const tbmStarted = photoCount > 0 || !!(tbm.safetyInstructions && String(tbm.safetyInstructions).trim());
-  const confirmedCount = confs.filter((c) => c.signature).length;
+  const confirmedCount = participants.filter((p: any) => !!p.tbmSignature).length; // ⑥ 참여자별(이름||전화) 매칭
   // 🔴 2차 격상: 사진 ≥1 + 참여자 전원 서명이어야 2차 승인 가능(서버도 차단).
   const tbmComplete = photoCount >= 1 && participants.length > 0 && confirmedCount >= participants.length;
   const tbmReason = `TBM 미완료: 사진 ${photoCount}/1, 서명 ${confirmedCount}/${participants.length}명`;
@@ -376,7 +374,7 @@ export default function AdminWorkPermitDetailPage() {
           <tbody>
             {participants.map((p, i) => {
               const nm = (p.name ?? '').trim();
-              const tbmOk = confByName.has(nm) && !!confByName.get(nm)?.signature;
+              const tbmOk = !!p.tbmSignature;
               const plOk = pledgeSigByName.get(nm) === true;
               return (
                 <tr key={i} className="border-b border-slate-50">
@@ -420,8 +418,7 @@ export default function AdminWorkPermitDetailPage() {
           <div className="flex flex-wrap gap-2">
             {participants.map((p, i) => {
               const nm = (p.name ?? '').trim();
-              const c = confByName.get(nm);
-              const s = c?.signature;
+              const s = p.tbmSignature;
               return (
                 <div key={i} className="border border-slate-200 rounded p-1 w-24 text-center">
                   {s ? <img src={s} alt={`${nm} 서명`} className="h-8 mx-auto bg-white" />

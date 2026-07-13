@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { sanitizePermissions } from '@/lib/admin-permissions';
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 export const runtime = 'nodejs';
 

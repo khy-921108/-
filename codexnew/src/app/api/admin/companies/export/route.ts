@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { buildCompaniesWorkbook } from '@/lib/excel-helpers';
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 export const runtime = 'nodejs'; // exceljs 는 node 런타임 필요
 

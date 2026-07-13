@@ -7,6 +7,8 @@ import {
   isDocCategory,
   pathBelongsToCompany,
 } from '@/lib/company-documents';
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 export const runtime = 'nodejs';
 

@@ -97,6 +97,8 @@ export interface PermitDocData {
   participants: {
     name: string | null;
     companyName: string | null;
+    tbmSignature?: string | null;   // ⑥ 참여자별 TBM 서명(이름||전화 매칭)
+    tbmConfirmedAt?: string | null;
   }[];
   note?: string | null;
   /** 중장비·굴착 장비(종류·차량번호·교육차량 대조결과) */
@@ -710,15 +712,7 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
   }
   (te?.riskFactors ?? []).slice(0, 6).forEach((rf, i) => setCell(ts, `D${rs + i}`, rf));
   (te?.safetyMeasures ?? []).slice(0, 6).forEach((mz, i) => setCell(ts, `F${rs + i}`, mz));
-  // 참여자 확인 스탬프 맵 (name → {signature, confirmedAt})
-  const confByName = new Map<string, { signature: string; confirmedAt?: string }>();
-  for (const c of Object.values(te?.confirmations ?? {})) {
-    if (c?.signature && c.signature.startsWith('data:image/')) {
-      confByName.set((c.name ?? '').trim(), { signature: c.signature, confirmedAt: c.confirmedAt });
-    }
-  }
-
-  // 참석자 그리드 — 좌12·우12 (서명 = 참여자 확인 스탬프, 미확인 공란)
+  // 참석자 그리드 — 좌12·우12 (서명 = 참여자별 TBM 스탬프[이름||전화 매칭], 미확인 공란)
   const ps = data.participants ?? [];
   const rows = T.participantRowEnd - T.participantRowStart + 1; // 12
   const capacity = rows * 2; // 24
@@ -734,12 +728,11 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
     const compCol = left ? 'C' : 'H';
     ts.getCell(`${nameCol}${r}`).value = p.name ?? '';
     ts.getCell(`${compCol}${r}`).value = p.companyName ?? '';
-    // 서명 D/I = 참여자 확인 스탬프(있으면), 미확인 공란
-    const conf = confByName.get((p.name ?? '').trim());
-    if (conf) {
+    // 서명 D/I = 참여자별 TBM 스탬프(있으면), 미확인 공란
+    if (p.tbmSignature && p.tbmSignature.startsWith('data:image/')) {
       const cell = `${left ? 'D' : 'I'}${r}`;
-      placeImage(wb, ts, conf.signature, cell, 55, 16, 0.05, 0.1);
-      placeSigLog(wb, ts, cell, p.name, conf.confirmedAt, 55);
+      placeImage(wb, ts, p.tbmSignature, cell, 55, 16, 0.05, 0.1);
+      placeSigLog(wb, ts, cell, p.name, p.tbmConfirmedAt ?? undefined, 55);
     }
   });
 

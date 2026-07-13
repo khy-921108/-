@@ -3,6 +3,8 @@ import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { isCompanyType, isCompanyStatus } from '@/lib/company';
 import { sendSms } from '@/lib/sms';
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 /**
  * GET /api/admin/companies/:id

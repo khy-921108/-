@@ -5,6 +5,8 @@ import { getCompanyRoster } from '@/lib/company-roster';
 import { buildCompanyRosterWorkbook } from '@/lib/excel-helpers';
 import type { CompanyType, CompanyStatus } from '@/lib/company';
 import type { EquipmentType, MemberType } from '@/lib/equipment';
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 export const runtime = 'nodejs'; // exceljs 는 node 런타임 필요
 

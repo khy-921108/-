@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { createServiceClient } from '@/lib/supabase/server';
 import { fillWorkPermitWorkbook, type PermitDocData } from '@/lib/work-permit-template';
 import { resolveSignerLabels, labelFor } from '@/lib/work-permit-signer';
+import { normalizePhone } from '@/lib/equipment';
 import { getDocsForOutput } from '@/lib/safety-doc-status';
 
 export const runtime = 'nodejs'; // exceljs + 템플릿 파일 읽기 + qrcode
@@ -116,11 +117,18 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     permit.approved_by, tbm.witness?.by, comp0.confirmBy, comp0.reportBy,
     ...Object.values(dept0).map((v: any) => v?.by),
   ]);
-  // 완료 확인자·별지 확인자 표기를 라벨로 치환(출력 사본 — DB 무변경)
-  const completionOut = { ...comp0, confirmBy: labelFor(smap, comp0.confirmBy) || comp0.confirmBy };
+  // 완료/별지 확인자 표기를 라벨로 치환(출력 사본 — DB 무변경).
+  //  ⑤: 미등록 관리자 이메일 fallback 노출 제거 — 이메일이면 라벨 or null, 이름이면 그대로(업체 종료신고자 등).
+  const safeLabel = (v: any): string | null => {
+    if (!v) return null;
+    const s = String(v);
+    if (!s.includes('@')) return s; // 이미 이름(관리자 이메일 아님)
+    return labelFor(smap, s) || null; // 미등록 이메일 → null(공란)
+  };
+  const completionOut = { ...comp0, confirmBy: safeLabel(comp0.confirmBy), reportBy: safeLabel(comp0.reportBy) };
   const deptOut: Record<string, any> = {};
   for (const [k, v] of Object.entries(dept0)) {
-    deptOut[k] = { ...(v as any), name: (v as any).name || labelFor(smap, (v as any).by) };
+    deptOut[k] = { ...(v as any), name: (v as any).name || safeLabel((v as any).by) };
   }
 
   const docData: PermitDocData = {
@@ -138,14 +146,18 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     },
     supplemental: permit.supplemental ?? {},
     equipment: Array.isArray(permit.equipment) ? permit.equipment : [],
-    participants: allParticipants.map((p) => ({ name: p.name, companyName: p.companyName })),
+    // ⑥ 동명이인 방지: TBM 서명을 저장 키(이름||정규화전화)로 참여자별 매칭.
+    participants: allParticipants.map((p: any) => {
+      const conf = (tbm.confirmations ?? {})[`${(p.name ?? '').trim()}||${normalizePhone(p.phone)}`];
+      return { name: p.name, companyName: p.companyName, tbmSignature: conf?.signature ?? null, tbmConfirmedAt: conf?.confirmedAt ?? null };
+    }),
     note: permit.note,
     createdAt: permit.created_at,
     docs,
     // ===== R-6 =====
     applicantSignature: permit.applicant_signature ?? null,
     issuer: {
-      name: labelFor(smap, permit.approved_by) || permit.approved_by || null,
+      name: safeLabel(permit.approved_by),
       title: permit.issuer_title ?? null,
       signature: permit.issuer_signature ?? null,
       at: permit.approved_at ?? null,
@@ -160,7 +172,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     completion: completionOut as PermitDocData['completion'],
     // R-6 ③-2a: 입회자(2차)·안전지시사항 = tbm JSONB
     witness: tbm.witness
-      ? { name: labelFor(smap, tbm.witness.by) || tbm.witness.by || null, signature: tbm.witness.signature ?? null, at: tbm.witness.at ?? null }
+      ? { name: safeLabel(tbm.witness.by), signature: tbm.witness.signature ?? null, at: tbm.witness.at ?? null }
       : null,
     safetyInstructions: typeof tbm.safetyInstructions === 'string' ? tbm.safetyInstructions : null,
     // R-6 ③-2b: 3차 별지 현장확인

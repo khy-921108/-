@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { getDocsForOutput } from '@/lib/safety-doc-status';
 import { stageFromRow } from '@/lib/work-permit-stage';
 import { resolveSignerLabels } from '@/lib/work-permit-signer';
+import { normalizePhone } from '@/lib/equipment';
 import QRCode from 'qrcode';
 
 export const runtime = 'nodejs';
@@ -191,16 +192,23 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       })),
       qrDataUrl,
       tbmPhotoUrls,
-      participants: (parts ?? []).map((p: any) => ({
-        name: p.name,
-        companyName: p.company_name,
-        targetType: p.target_type,
-        vehicleNumber: p.vehicle_number,
-        equipmentType: p.equipment_type,
-        spec: p.spec,
-        completedAt: p.completed_at,
-        expiresAt: p.expires_at,
-      })),
+      // ⑥ 동명이인 방지: TBM 서명을 저장 키(이름||정규화전화)로 참여자별 매칭해 첨부(이름 단독 매칭 금지).
+      participants: (parts ?? []).map((p: any) => {
+        const key = `${(p.name ?? '').trim()}||${normalizePhone(p.phone)}`;
+        const conf = (tbmObj.confirmations ?? {})[key];
+        return {
+          name: p.name,
+          companyName: p.company_name,
+          targetType: p.target_type,
+          vehicleNumber: p.vehicle_number,
+          equipmentType: p.equipment_type,
+          spec: p.spec,
+          completedAt: p.completed_at,
+          expiresAt: p.expires_at,
+          tbmSignature: conf?.signature ?? null,
+          tbmConfirmedAt: conf?.confirmedAt ?? null,
+        };
+      }),
       note: permit.note,
       createdAt: permit.created_at,
       docs,

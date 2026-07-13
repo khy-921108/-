@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
 import { isCompanyType, isCompanyStatus, type CompanyType } from '@/lib/company';
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 /**
  * GET /api/admin/companies?keyword=&type=&status=

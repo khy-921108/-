@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
-
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 
 /**
