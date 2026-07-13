@@ -67,8 +67,7 @@ export default function WorkPermitResult() {
           <div className="rounded-xl bg-amber-50 border border-amber-300 p-3 text-sm text-amber-800 space-y-2">
             <p>⚠️ 개인서약 <b>서명 미완료 {sig.unsigned.length}명</b> ({sig.signed}/{sig.total} 완료)</p>
             <p className="text-xs">미서명: {sig.unsigned.join(', ')}</p>
-            <p className="text-xs">※ 작업 시작 전까지 본인이 <b>'내 서약 서명'</b>에서 서명해야 합니다.</p>
-            <Link href="/work-permit/sign" className="inline-block text-xs font-bold text-amber-800 underline">→ 내 서약 서명 바로가기</Link>
+            <p className="text-xs">※ 예전에 서명 없이 발급된 서약입니다. 다음 신청 때 해당 참여자가 <b>직접 서명하면 재발급</b>되어 해결됩니다.</p>
           </div>
         )
       )}

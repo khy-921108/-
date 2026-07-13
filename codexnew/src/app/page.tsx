@@ -19,37 +19,37 @@ export default function HomePage() {
         </p>
       </div>
 
-      <div className="w-full space-y-3">
-        <Link href="/consent" className="btn-primary block text-center">
-          처음 수강하기
-        </Link>
-        <Link href="/lookup" className="btn-secondary block text-center">
-          기존 수료 이력 조회
-        </Link>
-        <Link
-          href="/access-pass"
-          className="block w-full rounded-xl bg-emerald-500 px-5 py-4 text-base font-bold text-white shadow transition active:scale-95 text-center"
-        >
-          🪪 출입증 보기
-        </Link>
-        <Link
-          href="/work-permit"
-          className="block w-full rounded-xl bg-slate-800 px-5 py-4 text-base font-bold text-white shadow transition active:scale-95 text-center"
-        >
-          📝 작업허가서 신청
-        </Link>
-        <Link
-          href="/work-permit/my"
-          className="block w-full rounded-xl border-2 border-slate-800 bg-white px-5 py-4 text-base font-bold text-slate-800 transition active:scale-95 text-center"
-        >
-          📋 내 작업허가 조회
-        </Link>
-        <Link
-          href="/work-permit/sign"
-          className="block w-full rounded-xl border-2 border-amber-500 bg-white px-5 py-4 text-base font-bold text-amber-700 transition active:scale-95 text-center"
-        >
-          ✍️ 내 서약 서명
-        </Link>
+      <div className="w-full space-y-6">
+        {/* 공장 출입 — 기사·방문자·작업자 */}
+        <section className="space-y-3">
+          <h2 className="text-left text-sm font-bold text-slate-600">🚚 공장 출입 (기사·방문자·작업자)</h2>
+          <Link href="/consent" className="btn-primary block text-center">
+            처음 수강하기
+          </Link>
+          <Link
+            href="/access-pass"
+            className="block w-full rounded-xl bg-emerald-500 px-5 py-4 text-base font-bold text-white shadow transition active:scale-95 text-center"
+          >
+            🪪 출입증 보기
+          </Link>
+        </section>
+
+        {/* 공사·작업 업체 */}
+        <section className="space-y-3">
+          <h2 className="text-left text-sm font-bold text-slate-600">🔧 공사·작업 업체</h2>
+          <Link
+            href="/work-permit"
+            className="block w-full rounded-xl bg-slate-800 px-5 py-4 text-base font-bold text-white shadow transition active:scale-95 text-center"
+          >
+            📝 작업허가서 신청
+          </Link>
+          <Link
+            href="/work-permit/my"
+            className="block w-full rounded-xl border-2 border-slate-800 bg-white px-5 py-4 text-base font-bold text-slate-800 transition active:scale-95 text-center"
+          >
+            📋 내 작업허가 조회
+          </Link>
+        </section>
       </div>
 
       <p className="mt-10 text-xs text-slate-400">

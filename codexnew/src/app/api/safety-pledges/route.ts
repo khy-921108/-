@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { normalizePhone } from '@/lib/equipment';
 import { sixMonthsLater } from '@/lib/safety-doc-status';
+import { isValidSignature } from '@/lib/upload-validate';
 
 /**
  * POST /api/safety-pledges  (공개) — 개인 안전준수 서약(#8) 발급
@@ -20,11 +21,8 @@ export async function POST(req: Request) {
     const nationality = (typeof body.nationality === 'string' ? body.nationality : '').trim() || null;
     const bloodType = (typeof body.bloodType === 'string' ? body.bloodType : '').trim() || null;
     const jobType = (typeof body.jobType === 'string' ? body.jobType : '').trim() || null;
-    // 디지털 서명(PNG data URL). 과대 입력 방지 300KB 한도.
-    let signature: string | null = typeof body.signature === 'string' ? body.signature : null;
-    if (signature && (!signature.startsWith('data:image/') || signature.length > 300_000)) {
-      signature = null;
-    }
+    // 🔴 서약 서명 필수 — 서명 없는 서약서는 발급하지 않는다(뒷문 제거). PNG 서명만 허용.
+    const signature = typeof body.signature === 'string' ? body.signature : '';
 
     if (!name || !birthDate || phone.length < 10) {
       return NextResponse.json(
@@ -35,6 +33,12 @@ export async function POST(req: Request) {
     if (!nationality || !bloodType || !jobType) {
       return NextResponse.json(
         { success: false, code: 'INVALID_INPUT', message: '국적·혈액형·직종을 모두 입력해 주세요.' },
+        { status: 400 }
+      );
+    }
+    if (!isValidSignature(signature)) {
+      return NextResponse.json(
+        { success: false, code: 'SIGNATURE_REQUIRED', message: '본인 서명이 필요합니다. 서명 후 발급해 주세요.' },
         { status: 400 }
       );
     }

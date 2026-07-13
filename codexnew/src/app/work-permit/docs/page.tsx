@@ -128,7 +128,11 @@ export default function WorkPermitDocs() {
       setError(`${p.name} 님의 안전준수 서약 내용 확인에 동의해 주세요.`);
       return;
     }
-    // 서명은 선택 — 미서명 발급 가능(본인이 추후 '내 서약 서명'에서 서명).
+    // 🔴 서명 필수 — 서명 없이는 발급 불가.
+    if (!pSig[i]) {
+      setError(`${p.name} 님의 본인 서명을 입력해 주세요.`);
+      return;
+    }
     setPBusy((b) => ({ ...b, [i]: true }));
     setError('');
     try {
@@ -202,7 +206,7 @@ export default function WorkPermitDocs() {
         <p className="mt-1 text-sm text-slate-500">
           개인 안전준수 서약(참여자별) + 업체 안전작업 이행각서는 <b>6개월 유효</b>합니다. 미보유 시 작성하면 발급됩니다.
         </p>
-        <p className="mt-1 text-xs text-slate-400">※ 개인서약 서명은 선택입니다 — 지금 서명하거나, 작업 시작 전까지 본인이 ‘내 서약 서명’에서 완료하면 됩니다.</p>
+        <p className="mt-1 text-xs text-slate-400">※ 개인서약은 <b>본인 서명</b>을 해야 발급됩니다. 각 참여자가 직접 서명해 주세요.</p>
       </header>
 
       {loading ? (
@@ -276,12 +280,12 @@ export default function WorkPermitDocs() {
                         </label>
                       </div>
                       <div>
-                        <label className="label">본인 서명 (선택 — 지금 또는 추후 '내 서약 서명'에서)</label>
+                        <label className="label">본인 서명 <span className="text-red-500">*</span></label>
                         <SignaturePad onChange={(d) => setPSig((s) => ({ ...s, [i]: d }))} />
-                        <p className="mt-1 text-xs text-slate-500">※ 본인이 직접 서명하세요. 미서명 시에도 발급되며, 작업 시작 전까지 본인이 서명하면 됩니다.</p>
+                        <p className="mt-1 text-xs text-slate-500">※ 본인이 직접 서명해야 서약서가 발급됩니다.</p>
                       </div>
-                      <button type="button" onClick={() => issuePledge(i)} disabled={pBusy[i] || !pConfirm[i]} className="btn-primary">
-                        {pBusy[i] ? '발급 중...' : (pSig[i] ? '확인·서명 완료 · 서약서 발급' : '확인 완료 · 서약서 발급 (서명은 추후 가능)')}
+                      <button type="button" onClick={() => issuePledge(i)} disabled={pBusy[i] || !pConfirm[i] || !pSig[i]} className="btn-primary">
+                        {pBusy[i] ? '발급 중...' : '확인·서명 완료 · 서약서 발급'}
                       </button>
                     </div>
                   )}

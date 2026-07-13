@@ -139,6 +139,7 @@ export default function AccessPassResultPage() {
         )}
       </div>
 
+      <h2 className="text-left text-sm font-bold text-slate-600 pt-1">📘 수료 이력</h2>
       <div className="card space-y-3">
         <PassRow
           label="수료번호"

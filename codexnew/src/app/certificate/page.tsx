@@ -98,7 +98,7 @@ export default function CertificatePage() {
         <ul className="list-disc pl-5 space-y-1">
           <li>수료번호는 공장 출입 시 제시할 수 있습니다.</li>
           <li>유효기간 만료 후 재이수가 필요합니다.</li>
-          <li>재접속 시 "기존 수료 이력 조회"로 확인 가능합니다.</li>
+          <li>재접속 시 "출입증 보기"에서 확인 가능합니다.</li>
         </ul>
       </div>
 
