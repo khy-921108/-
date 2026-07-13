@@ -78,8 +78,10 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
   // 표시명 변환기(공개 응답에 이메일 원문 노출 금지 — 등록명 or 이메일 앞부분)
   const lab = (email?: string | null): string | null => {
     if (!email) return null;
-    // 미등록 계정이면 이메일 앞부분 노출 대신 null(화면에서 "(정보 미등록)"로 안내).
-    return signerLabelMap.get(String(email).toLowerCase()) || null;
+    const v = String(email);
+    // 이메일이 아니면(업체 종료신고자 성명 등) 그대로 표시. 미등록 관리자 이메일이면 null.
+    if (!v.includes('@')) return v;
+    return signerLabelMap.get(v.toLowerCase()) || null;
   };
 
   // ⚠️ 공개 응답 정화(3차 감사 발견1): tbm.confirmations 키의 전화번호 제거 + 서명자 이메일→표시명.

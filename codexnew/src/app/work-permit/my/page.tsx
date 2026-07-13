@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { SUPPLEMENTAL_WORKS } from '@/lib/work-permit-constants';
 import { STAGE_BADGE_CLASS, type Stage } from '@/lib/work-permit-stage';
 import { writeDraft, clearDraft } from '@/lib/work-permit-draft';
+import SignaturePad from '@/components/SignaturePad';
 
 interface CopySource {
   companyId: string | null;
@@ -78,6 +79,12 @@ export default function MyWorkPermits() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // 작업 종료 신고(소장 직접)
+  const [reportFor, setReportFor] = useState<Item | null>(null);
+  const [reportSig, setReportSig] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportErr, setReportErr] = useState('');
 
   const formatPhone = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 11);
 
@@ -155,6 +162,26 @@ export default function MyWorkPermits() {
       sessionStorage.setItem('wp_tbm_cred', JSON.stringify({ name, birthDate, phone }));
     } catch { /* */ }
     router.push(`/work-permit/tbm/${permitId}`);
+  };
+
+  const openReport = (it: Item) => { setReportSig(''); setReportErr(''); setReportFor(it); };
+  const submitReport = async () => {
+    if (!reportFor) return;
+    if (!reportSig) { setReportErr('신고자(현장소장) 서명을 입력해 주세요.'); return; }
+    setReportBusy(true); setReportErr('');
+    try {
+      const res = await fetch(`/api/work-permits/${reportFor.permitId}/complete-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, birthDate, phone, signature: reportSig }),
+      });
+      const json = await res.json();
+      if (!json.success) { setReportErr(json.message || '종료신고 실패'); setReportBusy(false); return; }
+      setReportFor(null); setReportBusy(false);
+      search(month); // 목록 갱신 → "종료 확인 대기"로 전환
+    } catch {
+      setReportErr('네트워크 오류가 발생했습니다.'); setReportBusy(false);
+    }
   };
 
   const [my, mm] = month.split('-');
@@ -258,12 +285,31 @@ export default function MyWorkPermits() {
                   </div>
                   <span className="text-slate-300 text-lg shrink-0">›</span>
                 </div>
-                {it.issued && (
+                {/* 승인완료~TBM 전: 현장 TBM 진행 */}
+                {it.stage?.key === 'SITE_CHECK' && (
                   <button
                     onClick={(e) => { e.stopPropagation(); goTbm(it.permitId); }}
                     className="w-full rounded-lg bg-emerald-600 text-white text-sm font-bold py-2 hover:bg-emerald-700"
                   >
                     🦺 현장 TBM 진행 (사진·작업자 서명)
+                  </button>
+                )}
+                {/* TBM 제출 후~2차 전: 작은 링크로 작업자 서명 추가만 */}
+                {it.stage?.key === 'WITNESS_WAIT' && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); goTbm(it.permitId); }}
+                    className="text-xs font-bold text-emerald-700 underline"
+                  >
+                    + 작업자 서명 추가 (2차 확인 전까지)
+                  </button>
+                )}
+                {/* 작업 중(개시 후): 소장 직접 종료 신고 */}
+                {it.stage?.key === 'STARTED' && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); openReport(it); }}
+                    className="w-full rounded-lg bg-slate-800 text-white text-sm font-bold py-2 hover:bg-slate-900"
+                  >
+                    🏁 작업 종료 신고
                   </button>
                 )}
                 <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
@@ -316,6 +362,30 @@ export default function MyWorkPermits() {
       <button onClick={() => router.push('/work-permit')} className="btn-secondary">
         새 작업허가 신청
       </button>
+
+      {/* 작업 종료 신고 모달 (소장 직접) */}
+      {reportFor && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !reportBusy && setReportFor(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-bold text-slate-800">🏁 작업 종료 신고 <span className="text-xs font-normal text-slate-500 font-mono">{reportFor.permitNumber}</span></h3>
+            <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-slate-700">
+              현장 정리·화기 후 확인 등 마무리 조치를 <b>모두 마친 뒤</b> 신고해 주세요. 신고 후 안전환경 담당자의 <b>최종 종료확인</b>이 진행됩니다.
+            </div>
+            <div>
+              <label className="label">신고자(현장소장) 서명 <span className="text-red-500">*</span></label>
+              <SignaturePad onChange={setReportSig} />
+            </div>
+            {reportErr && <p className="text-sm text-red-600">{reportErr}</p>}
+            <div className="flex gap-2 justify-end">
+              <button className="btn-secondary" onClick={() => setReportFor(null)} disabled={reportBusy}>취소</button>
+              <button
+                className="text-sm px-5 py-2 rounded-lg font-bold bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-50"
+                onClick={submitReport} disabled={reportBusy || !reportSig}
+              >{reportBusy ? '신고 중…' : '종료 신고'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
