@@ -19,7 +19,8 @@ export type StageKey =
   | 'THIRD_CHECK'   // 3차 확인 필요
   | 'START_READY'   // 작업개시 가능
   | 'IN_PROGRESS'   // 승인 진행중 (목록 경량뱃지 — 중간단계 통합)
-  | 'STARTED'       // 작업개시
+  | 'STARTED'       // 작업개시(작업 중)
+  | 'REPORT_WAIT'   // 종료확인 대기 (종료신고 완료, 안전환경 최종확인 전)
   | 'OVERDUE'       // 미종료 (작업개시했으나 기간 경과+종료확인 없음)
   | 'EXPIRED'       // 기간 경과 (개시 안 하고 기간만 지남)
   | 'CLOSED'        // 작업종료
@@ -35,6 +36,8 @@ export interface StageInput {
   deptConfirmations?: Record<string, { signature?: string | null } | undefined> | null;
   startedAt?: string | null;
   completionConfirmed?: boolean;
+  /** 종료신고(작업자 서명) 완료 — 종료확인 대기 판정용. */
+  reportSubmitted?: boolean;
   /** 작업 종료 예정일시(ISO). now 와 함께 있으면 "미종료/기간 경과" 판정에 사용. */
   workEnd?: string | null;
   /** 판정 시각(epoch ms). 렌더/요청 시점. 없으면 미종료 판정 생략(하위호환). */
@@ -54,6 +57,8 @@ const isSig = (s?: string | null): boolean => !!(s && String(s).startsWith('data
 
 export function computeStage(i: StageInput): Stage {
   if (i.completionConfirmed) return { key: 'CLOSED', label: '작업종료' };
+  // 종료신고까지 됐으면 "종료확인 대기"(미종료보다 우선 — 안전환경 최종확인만 남음).
+  if (i.reportSubmitted) return { key: 'REPORT_WAIT', label: '종료확인 대기' };
   // 미종료 판정: 종료확인 없이 기간 경과(반려 제외). 개시 여부로 미종료/기간 경과 구분.
   if ((i.status ?? '') !== 'REJECTED' && isPastEnd(i.workEnd, i.now)) {
     return i.startedAt ? { key: 'OVERDUE', label: '미종료' } : { key: 'EXPIRED', label: '기간 경과' };
@@ -97,9 +102,17 @@ export function stageFromRow(row: any, now?: number): Stage {
     deptConfirmations: row?.dept_confirmations ?? {},
     startedAt: row?.started_at ?? null,
     completionConfirmed: isSig(comp.confirmSignature),
+    reportSubmitted: isSig(comp.workerSignature),
     workEnd: row?.work_end ?? null,
     now,
   });
+}
+
+/** stage → 관리자 목록 3분류 버킷. 처리 필요(todo) / 작업 중(active) / 끝난 것(done). */
+export function stageBucket(key: StageKey): 'todo' | 'active' | 'done' {
+  if (key === 'CLOSED' || key === 'REJECTED' || key === 'EXPIRED') return 'done';
+  if (key === 'STARTED') return 'active';
+  return 'todo'; // WAITING·SITE_CHECK·WITNESS_WAIT·THIRD_CHECK·START_READY·IN_PROGRESS·OVERDUE·REPORT_WAIT
 }
 
 /**
@@ -111,7 +124,11 @@ export function stageFromRow(row: any, now?: number): Stage {
 export function stageFromLightRow(row: any, now?: number): Stage {
   const status = row?.status ?? '';
   if (status === 'COMPLETED') return { key: 'CLOSED', label: '작업종료' };
-  // 미종료 판정: 종료(COMPLETED)·반려 아니면서 기간 경과. 개시 여부로 구분.
+  const comp = (row?.completion ?? {}) as Record<string, any>;
+  if (isSig(comp.confirmSignature)) return { key: 'CLOSED', label: '작업종료' };
+  // 종료신고 완료 → 종료확인 대기(미종료보다 우선). completion 컬럼 필요.
+  if (isSig(comp.workerSignature)) return { key: 'REPORT_WAIT', label: '종료확인 대기' };
+  // 미종료 판정: 종료·반려 아니면서 기간 경과. 개시 여부로 구분.
   if (status !== 'REJECTED' && isPastEnd(row?.work_end, now)) {
     return row?.started_at ? { key: 'OVERDUE', label: '미종료' } : { key: 'EXPIRED', label: '기간 경과' };
   }
@@ -130,6 +147,7 @@ export const STAGE_BADGE_CLASS: Record<StageKey, string> = {
   START_READY: 'bg-sky-100 text-sky-700',
   IN_PROGRESS: 'bg-amber-100 text-amber-700',
   STARTED: 'bg-emerald-100 text-emerald-700',
+  REPORT_WAIT: 'bg-teal-100 text-teal-700', // 종료확인 대기
   OVERDUE: 'bg-red-500 text-white',       // 미종료 — 강조(빨강)
   EXPIRED: 'bg-slate-200 text-slate-600', // 기간 경과 — 회색
   CLOSED: 'bg-indigo-100 text-indigo-700',

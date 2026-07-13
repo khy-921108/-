@@ -169,6 +169,29 @@ export default function WorkPermitStart() {
         </p>
       </header>
 
+      {/* 접이식 안내 가이드 (기본 펼침) */}
+      <details open className="card">
+        <summary className="cursor-pointer font-bold text-slate-800 text-sm select-none">📋 작업허가서 안내 (처음이면 펼쳐보세요)</summary>
+        <div className="mt-3 space-y-2.5 text-sm text-slate-600">
+          <div>
+            <p className="font-bold text-slate-700">허가서가 필요한 작업</p>
+            <p>화기·고소·밀폐·전기·중장비 등 위험작업과 공사성 작업. <span className="text-slate-400">(단순 납품·하역·방문은 출입증만으로 가능)</span></p>
+          </div>
+          <div>
+            <p className="font-bold text-slate-700">준비물</p>
+            <p>참여 작업자 전원 안전교육 수료 + 신청인(현장소장) 서명.</p>
+          </div>
+          <div>
+            <p className="font-bold text-slate-700">절차</p>
+            <p>신청 → 승인 → 현장 도착 후 TBM(사진+전원 서명) → 현장담당자 확인 → 작업 개시 → 종료신고.</p>
+          </div>
+          <div>
+            <p className="font-bold text-slate-700">규칙</p>
+            <p>허가서는 <b>당일 하루만 유효</b>(매일 신청). 지난 허가서는 조회 화면의 <b>[같은 내용으로 재신청]</b>으로 간편하게.</p>
+          </div>
+        </div>
+      </details>
+
       {gate !== 'OK' ? (
         <div className="space-y-4">
           <div>

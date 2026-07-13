@@ -92,6 +92,13 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+    // 🔴 신청인(현장소장) 서명 필수 — 서명 없으면 제출 불가.
+    if (!applicantSignature) {
+      return NextResponse.json(
+        { success: false, code: 'SIGNATURE_REQUIRED', message: '신청인(현장소장) 서명이 필요합니다. 서명 후 제출해 주세요.' },
+        { status: 400 }
+      );
+    }
 
     const supabase = createServiceClient();
 

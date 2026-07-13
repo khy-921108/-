@@ -124,6 +124,20 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     const instructions = typeof body?.safetyInstructions === 'string' ? body.safetyInstructions.trim() : '';
     if (!instructions) return fail('NO_INSTRUCTIONS', '오늘의 안전지시사항을 입력해 주세요.');
     const tbm = (permit.tbm ?? {}) as Record<string, any>;
+    // 🔴 2차 격상: TBM 사진 ≥1 + 참여자 전원 TBM 서명 필수(경고 후 진행 폐지, 서버 차단).
+    //  누락 시 경로 = 되돌리기 → 서명 추가 → 재승인. (공무 SUPER 긴급대리는 별지 전용 — 여기 예외 없음)
+    const photoCount = Array.isArray(tbm.photos) ? tbm.photos.length : 0;
+    const signedCount = Object.values(tbm.confirmations ?? {}).filter(
+      (c: any) => c?.signature && String(c.signature).startsWith('data:image/')
+    ).length;
+    const { count: partCount } = (await withTimeout(
+      supabase.from('work_permit_participants').select('id', { count: 'exact', head: true }).eq('work_permit_id', ctx.params.id),
+      'part-count'
+    )) as { count: number | null };
+    const total = partCount ?? 0;
+    if (photoCount < 1 || signedCount < total) {
+      return fail('TBM_INCOMPLETE', `TBM 미완료: 사진 ${photoCount}/1, 서명 ${signedCount}/${total}명`, 409);
+    }
     tbm.safetyInstructions = instructions;
     tbm.witness = { signature, at: now, by: actor };
     const { error } = await patchPermit({ tbm });

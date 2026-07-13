@@ -81,7 +81,6 @@ export default function AdminWorkPermitDetailPage() {
 
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
-  const [witnessWarn, setWitnessWarn] = useState(false);
 
   const [modal, setModal] = useState<ModalState>(null);
   const [sig, setSig] = useState('');
@@ -145,7 +144,9 @@ export default function AdminWorkPermitDetailPage() {
   const photoCount = Array.isArray(tbm.photos) ? tbm.photos.length : 0;
   const tbmStarted = photoCount > 0 || !!(tbm.safetyInstructions && String(tbm.safetyInstructions).trim());
   const confirmedCount = confs.filter((c) => c.signature).length;
-  const tbmHasContent = photoCount > 0 || confirmedCount > 0; // ③-2c: 2차 경고 판단(사진 또는 작업자 서명)
+  // 🔴 2차 격상: 사진 ≥1 + 참여자 전원 서명이어야 2차 승인 가능(서버도 차단).
+  const tbmComplete = photoCount >= 1 && participants.length > 0 && confirmedCount >= participants.length;
+  const tbmReason = `TBM 미완료: 사진 ${photoCount}/1, 서명 ${confirmedCount}/${participants.length}명`;
 
   const isSuper = me?.role === 'SUPER';
   const perms = me?.permissions ?? [];
@@ -188,10 +189,9 @@ export default function AdminWorkPermitDetailPage() {
   const resetFields = () => { setSig(''); setTitle(''); setInstructions(tbm.safetyInstructions ?? ''); setReason(''); setRestoreState(comp.restoreState ?? ''); setCompletedAt(''); setModalErr(''); };
   const openModal = (m: ModalState) => { resetFields(); setModal(m); };
 
-  // 2차 승인 진입 — TBM(사진·작업자 서명) 없으면 경고 후 진행(게이트 잠금 아님)
+  // 2차 승인 진입 — TBM 완료(사진+전원 서명) 후에만(버튼도 비활성, 서버도 차단).
   const startWitness = () => {
     if (witnessSigned && !confirm('입회 서명을 다시 하면 덮어씁니다. 계속할까요?')) return;
-    if (!tbmHasContent) { setWitnessWarn(true); return; }
     openModal({ type: 'witness' });
   };
 
@@ -416,7 +416,14 @@ export default function AdminWorkPermitDetailPage() {
       <section className="card">
         <h2 className="font-bold text-slate-700 mb-1">승인 서명 (1·2차)</h2>
         <SigRow label="신청인" sub="TBM 팀장 겸용" signature={data.applicantSignature} who={info.applicantName} at={data.createdAt} />
-        <SigRow label="안전관리자" sub="TBM 확인" signature={tbm.safetyManager?.signature} who={tbm.safetyManager?.name} />
+        {/* 안전관리자(TBM 확인) — 업체 안전관리자 기능 미도입, 죽은 필드 대신 보류 표시 */}
+        <div className="flex items-center gap-3 py-2 border-b border-slate-100">
+          <div className="w-28 shrink-0">
+            <p className="text-sm font-semibold text-slate-700">안전관리자</p>
+            <p className="text-[11px] text-slate-400">TBM 확인</p>
+          </div>
+          <span className="rounded-full text-xs font-medium px-2 py-0.5 bg-slate-100 text-slate-400 cursor-help" title="업체 안전관리자 기능 도입 시 사용 예정">보류</span>
+        </div>
         <SigRow label="발급 (1차)" sub="안전환경" signature={data.issuer?.signature} who={slabel(data.issuer?.name)} at={data.issuer?.at}
           action={(hasApprove && !started && !isPast) || rbShow('issuer') ? (
             <div className="flex items-center gap-1.5 flex-wrap justify-end">
@@ -427,9 +434,18 @@ export default function AdminWorkPermitDetailPage() {
         <SigRow label="입회 (2차)" sub="안전환경 현장입회" signature={witness?.signature} who={slabel(witness?.by)} at={witness?.at}
           action={(hasApprove && !started && !isPast) || rbShow('witness') ? (
             <div className="flex items-center gap-1.5 flex-wrap justify-end">
-              {hasApprove && !started && !isPast && (issuerSigned
-                ? btn(witnessSigned ? '재서명' : '2차 승인', startWitness)
-                : <span className="text-[11px] text-slate-400">1차 후 가능</span>)}
+              {hasApprove && !started && !isPast && (
+                !issuerSigned ? (
+                  <span className="text-[11px] text-slate-400">1차 후 가능</span>
+                ) : (witnessSigned || tbmComplete) ? (
+                  btn(witnessSigned ? '재서명' : '2차 승인', startWitness)
+                ) : (
+                  <div className="text-right">
+                    <button disabled className="text-xs px-3 py-1.5 rounded-lg font-bold bg-slate-100 text-slate-400 cursor-not-allowed">2차 승인</button>
+                    <p className="text-[10px] text-amber-600 mt-0.5 whitespace-nowrap">{tbmReason}</p>
+                  </div>
+                )
+              )}
               {rbShow('witness') && rbBtn({ step: 'witness', label: '2차 입회' })}
             </div>
           ) : null} />
@@ -614,20 +630,6 @@ export default function AdminWorkPermitDetailPage() {
             <div className="flex gap-2 justify-end pt-1">
               <button className="btn-secondary" onClick={() => setModal(null)} disabled={saving}>취소</button>
               <button className="btn-primary" onClick={submitSig} disabled={saving}>{saving ? '저장 중…' : '서명 저장'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 2차 TBM 미완료 경고 */}
-      {witnessWarn && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setWitnessWarn(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-bold text-amber-700">⚠️ TBM 미완료</h3>
-            <p className="text-sm text-slate-600">TBM 현장 사진·작업자 서명이 하나도 없습니다. 현장 TBM을 확인하고 서명하시겠습니까?</p>
-            <div className="flex gap-2 justify-end pt-1">
-              <button className="btn-secondary" onClick={() => setWitnessWarn(false)}>취소</button>
-              <button className="btn-primary" onClick={() => { setWitnessWarn(false); openModal({ type: 'witness' }); }}>확인하고 진행</button>
             </div>
           </div>
         </div>

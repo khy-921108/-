@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { stageFromLightRow } from '@/lib/work-permit-stage';
+import { stageFromRow } from '@/lib/work-permit-stage';
 
 /**
  * POST /api/work-permits/my-list  (공개) — 신청자 본인 신청내역 조회 (월 단위)
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
       .from('work_permits')
       .select(
         `id, permit_number, work_name, work_start, work_end, request_company_name, supplemental,
-         status, created_at, issuer_signature, started_at,
+         status, created_at, issuer_signature, started_at, completion, dept_confirmations,
          work_location, equipment_no, work_content, applicant_title, request_company_id, tbm`
       )
       .eq('applicant_name', name)
@@ -79,7 +79,7 @@ export async function POST(req: Request) {
       companyName: p.request_company_name,
       supplemental: p.supplemental ?? {},
       status: p.status,
-      stage: stageFromLightRow(p, nowMs), // R-6 진행단계(목록 경량뱃지, 미종료 판정 포함)
+      stage: stageFromRow(p, nowMs), // R-6 진행단계(업체 카드 = 전체 단계 필요 → full stage)
       createdAt: p.created_at,
       issued: !!(p.issuer_signature && String(p.issuer_signature).startsWith('data:image/')), // 1차 승인 여부
       // 복사 재신청용 원본 내용(본인확인 통과자 본인 것만). 날짜·서명·참여자·TBM 확인은 제외.

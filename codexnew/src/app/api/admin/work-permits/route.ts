@@ -27,7 +27,7 @@ export async function GET(req: Request) {
     .select(
       `id, permit_number, permit_type, request_company_name, work_name, work_start, work_end,
        applicant_name, supplemental, status, approved_by, approved_at, created_at,
-       issuer_signature, started_at`
+       issuer_signature, started_at, completion`
     )
     .order('work_start', { ascending: false })
     .limit(500);

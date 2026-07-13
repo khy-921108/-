@@ -54,7 +54,6 @@ export default function SiteTbmPage() {
   const [busy, setBusy] = useState(false);
   const [signFor, setSignFor] = useState<string | null>(null);
   const [sig, setSig] = useState('');
-  const [submitted, setSubmitted] = useState(false);
 
   const call = useCallback(async (c: Cred, extra: any) => {
     const ac = new AbortController();
@@ -121,9 +120,9 @@ export default function SiteTbmPage() {
     if (!cred) return;
     setBusy(true); setError('');
     const json = await call(cred, { action: 'submit' });
+    if (!json.success) { setBusy(false); setError(json.message || '제출 실패'); return; }
+    await loadSession(cred); // tbmSubmitted 플래그 갱신(제출 후에도 화면 유지, 사진·서명 추가는 2차 전까지 가능)
     setBusy(false);
-    if (!json.success) { setError(json.message || '제출 실패'); return; }
-    setSubmitted(true);
   };
 
   // ── 본인확인 폼 ──
@@ -145,20 +144,6 @@ export default function SiteTbmPage() {
           {error && <div className="rounded-lg bg-red-50 p-2 text-sm text-red-700">{error}</div>}
           <button onClick={onVerify} disabled={busy} className="btn-primary">{busy ? '확인 중…' : '본인확인'}</button>
           <button onClick={() => router.push('/work-permit/my')} className="btn-secondary">내 작업허가 목록</button>
-        </div>
-      </main>
-    );
-  }
-
-  // ── 제출 완료 ──
-  if (submitted) {
-    return (
-      <main className="space-y-5">
-        <div className="card text-center py-10 space-y-2">
-          <div className="text-4xl">✅</div>
-          <h1 className="text-xl font-bold text-slate-800">현장 TBM 제출 완료</h1>
-          <p className="text-sm text-slate-500">안전환경 담당자에게 확인 요청이 전송되었습니다.<br />담당자의 2차(입회) 승인 후 작업이 개시됩니다.</p>
-          <button onClick={() => router.push('/work-permit/my')} className="btn-primary mt-2">내 작업허가 목록</button>
         </div>
       </main>
     );
@@ -191,6 +176,15 @@ export default function SiteTbmPage() {
 
       {error && <div className="card bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
 
+      {/* 제출/확인 상태 */}
+      {data.tbmSubmitted && (
+        <div className={`card text-sm font-bold ${data.witnessConfirmed ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-sky-50 border border-sky-200 text-sky-700'}`}>
+          {data.witnessConfirmed
+            ? '✅ 현장담당자 확인 완료'
+            : '✅ TBM 제출 완료 — 현장담당자 확인 절차 진행 중입니다 (2차 입회)'}
+        </div>
+      )}
+
       {/* ① 사진 */}
       <section className="card space-y-2">
         <h2 className="font-bold text-slate-700">① TBM 현장 사진 <span className="text-xs text-slate-400">({data.photoCount}/{data.maxPhotos})</span></h2>
@@ -198,9 +192,9 @@ export default function SiteTbmPage() {
           {previews.map((p, i) => <img key={i} src={p} alt={`사진${i + 1}`} className="w-24 h-14 object-cover rounded border border-slate-200" />)}
         </div>
         <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => addPhoto(e.target.files)} />
-        <button onClick={() => fileRef.current?.click()} disabled={busy || data.photoCount >= data.maxPhotos}
-          className={`w-full rounded-lg py-2 text-sm font-bold ${data.photoCount >= data.maxPhotos ? 'bg-slate-100 text-slate-400' : 'btn-secondary'}`}>
-          📷 {data.photoCount >= data.maxPhotos ? '사진 2장 완료' : '사진 촬영/선택'}
+        <button onClick={() => fileRef.current?.click()} disabled={busy || data.photoCount >= data.maxPhotos || data.witnessConfirmed}
+          className={`w-full rounded-lg py-2 text-sm font-bold ${data.photoCount >= data.maxPhotos || data.witnessConfirmed ? 'bg-slate-100 text-slate-400' : 'btn-secondary'}`}>
+          📷 {data.witnessConfirmed ? '확인 완료(수정 불가)' : data.photoCount >= data.maxPhotos ? '사진 2장 완료' : '사진 촬영/선택'}
         </button>
       </section>
 
@@ -219,7 +213,9 @@ export default function SiteTbmPage() {
                 <p className="text-[11px] text-slate-400">{r.companyName}</p>
               </div>
               {r.confirmed ? (
-                <span className="text-xs font-bold text-emerald-600">✅ 서명완료 <button onClick={() => setSignFor(r.name)} className="ml-1 text-slate-400 underline">재서명</button></span>
+                <span className="text-xs font-bold text-emerald-600">✅ 서명완료 {!data.witnessConfirmed && <button onClick={() => setSignFor(r.name)} className="ml-1 text-slate-400 underline">재서명</button>}</span>
+              ) : data.witnessConfirmed ? (
+                <span className="text-xs text-slate-400">미서명</span>
               ) : (
                 <button onClick={() => { setSig(''); setSignFor(r.name); }} className="btn-primary text-xs px-3 py-1.5">서명</button>
               )}
@@ -229,13 +225,16 @@ export default function SiteTbmPage() {
       </section>
 
       {/* 제출 */}
-      <section className="card space-y-2">
-        <button onClick={submitTbm} disabled={busy || (data.photoCount === 0 && confirmedCount === 0)}
-          className={`w-full rounded-lg py-3 font-bold ${data.photoCount === 0 && confirmedCount === 0 ? 'bg-slate-100 text-slate-400' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>
-          제출 (안전환경 2차 확인 요청)
-        </button>
-        {data.photoCount === 0 && confirmedCount === 0 && <p className="text-[11px] text-amber-600 text-center">사진 또는 작업자 서명을 1개 이상 완료해야 제출할 수 있습니다.</p>}
-      </section>
+      {!data.witnessConfirmed && (
+        <section className="card space-y-2">
+          <button onClick={submitTbm} disabled={busy || data.tbmSubmitted || (data.photoCount === 0 && confirmedCount === 0)}
+            className={`w-full rounded-lg py-3 font-bold ${data.tbmSubmitted || (data.photoCount === 0 && confirmedCount === 0) ? 'bg-slate-100 text-slate-400' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>
+            {data.tbmSubmitted ? '✅ 제출 완료 (확인 대기)' : '제출 (안전환경 2차 확인 요청)'}
+          </button>
+          {!data.tbmSubmitted && data.photoCount === 0 && confirmedCount === 0 && <p className="text-[11px] text-amber-600 text-center">사진 또는 작업자 서명을 1개 이상 완료해야 제출할 수 있습니다.</p>}
+          {data.tbmSubmitted && <p className="text-[11px] text-slate-400 text-center">제출 후에도 2차 확인 전까지 사진·서명을 추가할 수 있습니다.</p>}
+        </section>
+      )}
 
       {/* 서명 모달 */}
       {signFor && (

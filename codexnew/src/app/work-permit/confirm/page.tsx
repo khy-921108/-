@@ -35,6 +35,10 @@ export default function WorkPermitConfirm() {
 
   const submit = async () => {
     setError('');
+    if (!applicantSig) {
+      setError('신청인(현장소장) 서명을 입력해 주세요. 서명해야 제출됩니다.');
+      return;
+    }
     if (draft.copied && !confirmedToday) {
       setError('복사 재신청은 오늘의 작업조건·위험요인 확인 체크가 필요합니다.');
       return;
@@ -120,8 +124,8 @@ export default function WorkPermitConfirm() {
 
       <div className="card space-y-4">
         <div>
-          <p className="text-sm font-bold text-slate-700">신청인 서명 (TBM 팀장 서명 겸용)</p>
-          <p className="text-xs text-slate-500 mt-0.5 mb-2">서명하면 허가서 신청인란과 TBM 팀장란에 자동 인쇄됩니다. (선택)</p>
+          <p className="text-sm font-bold text-slate-700">신청인(현장소장) 서명 <span className="text-red-500">*</span> <span className="text-xs font-normal text-slate-500">(TBM 팀장 서명 겸용)</span></p>
+          <p className="text-xs text-slate-500 mt-0.5 mb-2">허가서 신청인란과 TBM 팀장란에 자동 인쇄됩니다. <b>서명해야 제출됩니다.</b></p>
           <SignaturePad onChange={setApplicantSig} />
         </div>
         <p className="text-xs text-slate-500">
@@ -148,7 +152,7 @@ export default function WorkPermitConfirm() {
 
       <div className="flex gap-2">
         <button type="button" onClick={() => router.push('/work-permit/docs')} className="btn-secondary">이전</button>
-        <button type="button" onClick={submit} disabled={submitting || (draft.copied && !confirmedToday)} className="btn-primary">
+        <button type="button" onClick={submit} disabled={submitting || !applicantSig || (draft.copied && !confirmedToday)} className="btn-primary">
           {submitting ? '제출 중...' : '신청 제출'}
         </button>
       </div>

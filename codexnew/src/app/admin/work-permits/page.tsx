@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { formatDate } from '@/lib/format';
 import { SUPPLEMENTAL_WORKS } from '@/lib/work-permit-constants';
-import { STAGE_BADGE_CLASS, type Stage } from '@/lib/work-permit-stage';
+import { STAGE_BADGE_CLASS, stageBucket, type Stage } from '@/lib/work-permit-stage';
 
 interface SigStatus {
   total: number;
@@ -66,7 +66,7 @@ export default function AdminWorkPermitsPage() {
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [month, setMonth] = useState(thisMonth);
-  const [unsignedOnly, setUnsignedOnly] = useState(false);
+  const [tab, setTab] = useState<'all' | 'todo' | 'active' | 'done'>('all');
   const [page, setPage] = useState(1);
 
   const load = async (m = month, kw = keyword) => {
@@ -98,7 +98,11 @@ export default function AdminWorkPermitsPage() {
     router.push(`/admin/work-permits/${permitId}`);
   };
 
-  const filtered = unsignedOnly ? items.filter((it) => (it.signature?.unsigned ?? 0) > 0) : items;
+  // 3분류 탭: 처리 필요(todo) / 작업 중(active) / 끝난 것(done). stage 공용 버킷 사용.
+  const bucketOf = (it: Item): 'todo' | 'active' | 'done' => (it.stage ? stageBucket(it.stage.key) : 'todo');
+  const counts = { todo: 0, active: 0, done: 0 };
+  items.forEach((it) => { counts[bucketOf(it)] += 1; });
+  const filtered = tab === 'all' ? items : items.filter((it) => bucketOf(it) === tab);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const curPage = Math.min(page, totalPages);
   const visibleItems = filtered.slice((curPage - 1) * PAGE_SIZE, curPage * PAGE_SIZE);
@@ -141,21 +145,32 @@ export default function AdminWorkPermitsPage() {
           >{loading ? '조회 중…' : '검색'}</button>
         </div>
 
-        <div className="flex items-center justify-between">
-          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer select-none">
-            <input type="checkbox" checked={unsignedOnly} onChange={(e) => { setUnsignedOnly(e.target.checked); setPage(1); }} className="h-4 w-4" />
-            ⚠️ 서명 미완료만 보기
-          </label>
+        {/* 3분류 탭 (건수 포함) */}
+        <div className="flex items-center gap-1 flex-wrap">
+          {([
+            { key: 'todo', label: '🖊 처리 필요', n: counts.todo },
+            { key: 'active', label: '🔵 작업 중', n: counts.active },
+            { key: 'done', label: '끝난 것', n: counts.done },
+            { key: 'all', label: '전체', n: items.length },
+          ] as const).map((t) => (
+            <button
+              key={t.key}
+              onClick={() => { setTab(t.key); setPage(1); }}
+              className={`text-xs font-bold px-3 py-1.5 rounded-full border ${tab === t.key ? 'bg-brand text-white border-brand' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+            >
+              {t.label} {t.n}
+            </button>
+          ))}
           <button
-            onClick={() => { setKeyword(''); setUnsignedOnly(false); setMonth(thisMonth); setPage(1); if (month === thisMonth) load(thisMonth, ''); }}
-            className="text-xs text-slate-500 underline"
+            onClick={() => { setKeyword(''); setTab('all'); setMonth(thisMonth); setPage(1); if (month === thisMonth) load(thisMonth, ''); }}
+            className="ml-auto text-xs text-slate-500 underline"
           >이번 달로 초기화</button>
         </div>
       </div>
 
       <div className="space-y-2">
         <p className="text-sm font-semibold text-slate-700">
-          {my}년 {Number(mm)}월 · 총 {filtered.length}건{unsignedOnly ? ' (서명 미완료만)' : ''}
+          {my}년 {Number(mm)}월 · {tab === 'all' ? '전체' : tab === 'todo' ? '처리 필요' : tab === 'active' ? '작업 중' : '끝난 것'} {filtered.length}건
         </p>
         {visibleItems.map((it) => {
           const supp = suppLabels(it.supplemental);
@@ -240,7 +255,7 @@ export default function AdminWorkPermitsPage() {
         })}
         {filtered.length === 0 && !loading && (
           <div className="card text-center text-slate-500 py-8">
-            {unsignedOnly && items.length > 0 ? '서명 미완료 신청이 없습니다.' : `${my}년 ${Number(mm)}월에 해당하는 작업허가가 없습니다.`}
+            {tab !== 'all' && items.length > 0 ? '이 분류에 해당하는 작업허가가 없습니다.' : `${my}년 ${Number(mm)}월에 해당하는 작업허가가 없습니다.`}
           </div>
         )}
 

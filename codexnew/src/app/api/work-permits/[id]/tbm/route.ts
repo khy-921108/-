@@ -110,6 +110,8 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
         photoCount: photos.length,
         maxPhotos: 2,
         roster,
+        tbmSubmitted: !!tbm.tbmSubmittedAt, // 제출 완료 여부
+        witnessConfirmed: !!(tbm.witness?.signature && String(tbm.witness.signature).startsWith('data:image/')), // 2차 입회 완료
       },
     });
   }

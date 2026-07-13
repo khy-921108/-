@@ -43,6 +43,22 @@ function fmtDateTime(iso: string): string {
 
 const PAGE_SIZE = 5;
 
+// 업체용 쉬운 말(단계 판정은 공용 stage 재사용 — 관리자·포털과 불일치 금지)
+const FRIENDLY_STATUS: Record<string, string> = {
+  WAITING: '신청 접수 — 승인 대기',
+  SITE_CHECK: '승인 완료 — 현장 도착 후 [현장 TBM 진행]',
+  WITNESS_WAIT: '✅ TBM 제출 — 현장담당자 확인 중 (2차 입회)',
+  THIRD_CHECK: '관련부서(공무) 확인 중',
+  START_READY: '작업 개시 승인 대기',
+  STARTED: '🔵 작업 중 — 종료 시 종료신고 안내',
+  REPORT_WAIT: '종료 확인 대기',
+  OVERDUE: '🔴 미종료 — 종료확인 필요',
+  EXPIRED: '기간 경과',
+  CLOSED: '✅ 작업 종료',
+  REJECTED: '반려',
+  IN_PROGRESS: '진행 중',
+};
+
 export default function MyWorkPermits() {
   const router = useRouter();
 
@@ -228,6 +244,12 @@ export default function MyWorkPermits() {
                       {it.stage && <span className={`rounded-full text-[11px] font-bold px-2 py-0.5 ${STAGE_BADGE_CLASS[it.stage.key]}`}>{it.stage.label}</span>}
                     </div>
                     <p className="font-bold text-slate-800 mt-0.5 hover:underline">{it.workName}</p>
+                    {it.stage && (
+                      <p className="text-sm font-bold text-slate-700 mt-1">
+                        {FRIENDLY_STATUS[it.stage.key] ?? it.stage.label}
+                        <span className="text-[11px] font-normal text-slate-400"> ({it.stage.label})</span>
+                      </p>
+                    )}
                     <p className="text-xs text-slate-500 mt-0.5">{it.companyName}</p>
                     <p className="text-xs text-slate-600 mt-0.5">📅 {fmtDateTime(it.workStart)} ~ {fmtDateTime(it.workEnd)}</p>
                     {supp.length > 0 && (
