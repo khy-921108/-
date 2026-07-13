@@ -15,7 +15,7 @@ export async function GET() {
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from('admins')
-    .select('id, email, role, permissions, is_active, created_by, created_at')
+    .select('id, email, role, permissions, is_active, created_by, created_at, display_name, title, department')
     .order('created_at', { ascending: true })
     .limit(500);
   if (error) {
@@ -34,6 +34,9 @@ export async function GET() {
         isActive: a.is_active,
         createdBy: a.created_by,
         createdAt: a.created_at,
+        displayName: a.display_name ?? '',
+        title: a.title ?? '',
+        department: a.department ?? '',
       })),
     },
   });

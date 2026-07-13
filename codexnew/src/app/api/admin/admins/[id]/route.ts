@@ -38,6 +38,12 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     update.permissions = sanitizePermissions(body.permissions);
   }
 
+  // 라벨 대리 등록(SUPER 전용) — 포털 승인 계정 등 로그인 불가 계정의 부서·이름·직책을 명부에서 대신 설정.
+  const clip = (v: unknown, n: number) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+  if (body.displayName !== undefined) update.display_name = clip(body.displayName, 50) || null;
+  if (body.title !== undefined) update.title = clip(body.title, 50) || null;
+  if (body.department !== undefined) update.department = clip(body.department, 50) || null;
+
   if (typeof body.isActive === 'boolean') {
     if (body.isActive === false) {
       // 본인 비활성 차단

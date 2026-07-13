@@ -11,6 +11,9 @@ interface AdminItem {
   isActive: boolean;
   createdBy: string | null;
   createdAt: string;
+  displayName: string;
+  title: string;
+  department: string;
 }
 
 // ADMIN 에게 부여 가능한 권한(기본+선택) — SUPER 전용 제외
@@ -174,6 +177,13 @@ function AdminRow({ admin, onChanged }: { admin: AdminItem; onChanged: () => voi
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
+  // 서명 라벨(부서·이름·직책) — SUPER 대리 등록
+  const [dept, setDept] = useState(admin.department);
+  const [dispName, setDispName] = useState(admin.displayName);
+  const [ttl, setTtl] = useState(admin.title);
+  const labelDirty = dept !== admin.department || dispName !== admin.displayName || ttl !== admin.title;
+  const labelPreview = [dept, dispName, ttl].map((s) => s.trim()).filter(Boolean).join(' ');
+
   const dirty = JSON.stringify([...perms].sort()) !== JSON.stringify([...admin.permissions].sort());
 
   const toggle = (key: string) =>
@@ -225,6 +235,28 @@ function AdminRow({ admin, onChanged }: { admin: AdminItem; onChanged: () => voi
         >
           {admin.isActive ? '비활성화' : '활성화'}
         </button>
+      </div>
+
+      {/* 서명 라벨 대리 등록 — 포털 승인 계정 등 로그인 불가 계정도 SUPER가 여기서 등록 */}
+      <div className="rounded-lg bg-slate-50 border border-slate-200 p-2 space-y-2">
+        <p className="text-[11px] font-bold text-slate-600">서명 라벨 (부서 · 이름 · 직책) — 출력·화면 표기용</p>
+        <div className="grid grid-cols-3 gap-1.5">
+          <input className="input-base text-sm" placeholder="부서" value={dept} onChange={(e) => setDept(e.target.value)} />
+          <input className="input-base text-sm" placeholder="이름" value={dispName} onChange={(e) => setDispName(e.target.value)} />
+          <input className="input-base text-sm" placeholder="직책" value={ttl} onChange={(e) => setTtl(e.target.value)} />
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] text-slate-400 truncate">
+            표시: {labelPreview ? <b className="text-slate-600">{labelPreview}</b> : <span className="italic">(정보 미등록)</span>}
+          </p>
+          {labelDirty && (
+            <button
+              onClick={() => patch({ displayName: dispName, title: ttl, department: dept }, '라벨 저장됨')}
+              disabled={busy}
+              className="btn-primary text-xs shrink-0 whitespace-nowrap"
+            >{busy ? '저장 중...' : '라벨 저장'}</button>
+          )}
+        </div>
       </div>
 
       {isSuper ? (
