@@ -240,8 +240,12 @@ export default function AdminWorkPermitDetailPage() {
     } catch { setBanner('저장 지연 또는 네트워크 오류입니다. 잠시 후 다시 시도해 주세요.'); }
   };
 
+  // 콤팩트 버튼(내용만큼 폭) — btn-primary(w-full)를 쓰지 않아 승인 서명 줄 버튼 크기 통일.
   const btn = (label: string, on: () => void, kind: 'primary' | 'warn' = 'primary') => (
-    <button onClick={on} className={`text-xs px-3 py-1.5 rounded-lg font-bold ${kind === 'warn' ? 'bg-amber-500 text-white hover:bg-amber-600' : 'btn-primary'}`}>{label}</button>
+    <button
+      onClick={on}
+      className={`shrink-0 whitespace-nowrap text-xs px-3 py-1.5 rounded-lg font-bold text-white disabled:opacity-50 ${kind === 'warn' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-brand hover:opacity-90'}`}
+    >{label}</button>
   );
 
   // ===== 이전 단계로 되돌리기 =====
