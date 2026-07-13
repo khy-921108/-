@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 
 export default function AdminSettingsPage() {
   const [email, setEmail] = useState('');
+  const [role, setRole] = useState('');
   const [department, setDepartment] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [title, setTitle] = useState('');
@@ -17,12 +18,18 @@ export default function AdminSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
 
+  // 전체 백업 안내 문구(SUPER 수정)
+  const [guide, setGuide] = useState('');
+  const [guideBusy, setGuideBusy] = useState(false);
+  const [guideMsg, setGuideMsg] = useState('');
+
   const load = async () => {
     try {
       const res = await fetch('/api/admin/me', { cache: 'no-store' });
       const json = await res.json();
       if (json.success) {
         setEmail(json.data.email ?? '');
+        setRole(json.data.role ?? '');
         setDepartment(json.data.department ?? '');
         setDisplayName(json.data.displayName ?? '');
         setTitle(json.data.title ?? '');
@@ -32,6 +39,21 @@ export default function AdminSettingsPage() {
     }
   };
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    fetch('/api/admin/backup-guide', { cache: 'no-store' })
+      .then((r) => r.json()).then((j) => { if (j.success) setGuide(j.data.guide); }).catch(() => {});
+  }, []);
+
+  const saveGuide = async () => {
+    setGuideBusy(true); setGuideMsg('');
+    try {
+      const res = await fetch('/api/admin/backup-guide', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guide }),
+      });
+      const j = await res.json();
+      setGuideMsg(j.success ? '안내 문구 저장됨' : (j.message || '저장 실패'));
+    } catch { setGuideMsg('네트워크 오류'); } finally { setGuideBusy(false); }
+  };
 
   const save = async () => {
     setSaving(true); setMsg('');
@@ -83,6 +105,28 @@ export default function AdminSettingsPage() {
       {msg && <div className="card bg-slate-50 text-sm text-slate-700">{msg}</div>}
 
       <button onClick={save} disabled={saving} className="btn-primary w-full">{saving ? '저장 중…' : '저장'}</button>
+
+      {/* 전체 백업 — 최고관리자 전용 (개인정보 전체 포함) */}
+      {role === 'SUPER' && (
+        <section className="card space-y-3 border-2 border-slate-300">
+          <h2 className="font-bold text-slate-800">📦 전체 백업 다운로드 <span className="text-xs font-normal text-slate-500">(최고관리자 전용)</span></h2>
+          <p className="text-xs text-slate-500">산업안전보건법 <b>서류 3년 보존</b> 대응. Supabase 무료 플랜은 자동 백업이 없어 이 백업이 실질 보존 수단입니다.</p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <a href="/api/admin/backup/data" className="flex-1 text-center rounded-xl bg-brand text-white px-5 py-4 text-base font-bold shadow active:scale-95">📄 데이터 백업</a>
+            <a href="/api/admin/backup/photos" className="flex-1 text-center rounded-xl bg-slate-700 text-white px-5 py-4 text-base font-bold shadow active:scale-95">🖼 사진 백업</a>
+          </div>
+          <p className="text-[11px] text-slate-400">※ 데이터(수료·업체·허가서·서약·각서 · 엑셀+JSON)와 TBM 현장사진을 나눠 받습니다. 생성에 수십 초 걸릴 수 있어요.</p>
+
+          <div className="rounded-lg bg-amber-50 border border-amber-200 p-2 space-y-2">
+            <p className="text-xs font-bold text-amber-800">보관 안내 문구 (버튼 옆 표시 — 수정 가능)</p>
+            <textarea className="input-base text-sm min-h-[60px]" maxLength={200} value={guide} onChange={(e) => setGuide(e.target.value)} />
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-slate-400">{guideMsg}</span>
+              <button onClick={saveGuide} disabled={guideBusy} className="text-xs font-bold px-3 py-1.5 rounded-lg bg-brand text-white disabled:opacity-50">{guideBusy ? '저장 중…' : '안내문구 저장'}</button>
+            </div>
+          </div>
+        </section>
+      )}
     </main>
   );
 }
