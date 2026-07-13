@@ -99,6 +99,8 @@ export interface PermitDocData {
     companyName: string | null;
   }[];
   note?: string | null;
+  /** 중장비·굴착 장비(종류·차량번호·교육차량 대조결과) */
+  equipment?: { type: string; vehicleNumber: string; matched?: boolean }[];
   createdAt: string; // ISO
   docs?: DocsOutput; // 1C-2 필수문서(있으면 시트 8 N장·9·7 채움)
   // ===== R-6: 디지털 서명 / 승인 / TBM 상세 / QR (없으면 공란) =====
@@ -755,10 +757,16 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
     });
   }
 
-  // 기타 특별사항: note + 참여자 초과분
+  // 기타 특별사항: note + 참여자 초과분 + 장비
   const etcParts: string[] = [];
   if (data.note && data.note.trim()) etcParts.push(data.note.trim());
   if (overflow.length > 0) etcParts.push(`추가 참여자: ${overflow.join(', ')}`);
+  const eqList = Array.isArray(data.equipment) ? data.equipment : [];
+  if (eqList.length > 0) {
+    etcParts.push('장비: ' + eqList.map((e) =>
+      `${e.type || '장비'}${e.vehicleNumber ? ` ${e.vehicleNumber}` : ''}${e.vehicleNumber && e.matched === false ? '(교육차량 불일치)' : ''}`
+    ).join(', '));
+  }
   if (etcParts.length > 0) {
     setCell(gs, G.etc, etcParts.join(' / '), true);
   }

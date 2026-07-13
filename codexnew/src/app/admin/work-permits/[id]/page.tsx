@@ -131,6 +131,7 @@ export default function AdminWorkPermitDetailPage() {
   if (error || !data) return <div className="card text-center text-red-600 py-8">{error || '데이터 없음'}</div>;
 
   const info = data.info ?? {};
+  const equipment: any[] = Array.isArray(data.equipment) ? data.equipment : [];
   const tbm = data.tbm ?? {};
   const comp = data.completion ?? {};
   const deptConfs: Record<string, any> = data.deptConfirmations ?? {};
@@ -339,6 +340,23 @@ export default function AdminWorkPermitDetailPage() {
         <Row k="신청인" v={`${info.applicantTitle ? info.applicantTitle + ' ' : ''}${info.applicantName ?? ''}`} />
         <Row k="신청일시" v={fmtDateTime(data.createdAt)} />
       </section>
+
+      {/* 장비 정보 (중장비·굴착) */}
+      {equipment.length > 0 && (
+        <section className="card text-sm">
+          <h2 className="font-bold text-slate-700 mb-2">🚜 장비 정보 ({equipment.length})</h2>
+          <ul className="divide-y divide-slate-100">
+            {equipment.map((eq, i) => (
+              <li key={i} className="py-1.5 flex items-center justify-between gap-2">
+                <span className="text-slate-800"><b>{eq.type || '장비'}</b>{eq.vehicleNumber ? ` · ${eq.vehicleNumber}` : ''}</span>
+                {eq.vehicleNumber && (eq.matched
+                  ? <span className="text-xs font-bold text-emerald-700 whitespace-nowrap shrink-0">✅ 교육차량 일치</span>
+                  : <span className="text-xs font-bold text-red-600 whitespace-nowrap shrink-0">⚠ 차량번호 불일치 — 현장 확인 요망</span>)}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* 참여자 3상태 */}
       <section className="card text-sm">
@@ -605,6 +623,16 @@ export default function AdminWorkPermitDetailPage() {
             {modal.type === 'issue' && (
               <div><label className="label">직책 (선택)</label>
                 <input className="input-base" placeholder="예: 안전환경담당" value={title} onChange={(e) => setTitle(e.target.value)} /></div>
+            )}
+            {modal.type === 'issue' && equipment.length > 0 && (
+              <div className="rounded-lg bg-slate-50 border border-slate-200 p-2 text-xs space-y-0.5">
+                <p className="font-bold text-slate-600">🚜 장비 정보 (승인 전 확인)</p>
+                {equipment.map((eq, i) => (
+                  <p key={i} className={eq.vehicleNumber && !eq.matched ? 'text-red-600 font-bold' : 'text-slate-700'}>
+                    · {eq.type || '장비'}{eq.vehicleNumber ? ` · ${eq.vehicleNumber}` : ''}{eq.vehicleNumber ? (eq.matched ? ' ✅' : ' ⚠ 불일치·현장확인') : ''}
+                  </p>
+                ))}
+              </div>
             )}
             {modal.type === 'witness' && (
               <div><label className="label">오늘의 안전지시사항 <span className="text-red-500">*</span></label>

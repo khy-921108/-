@@ -71,8 +71,10 @@ export default function WorkPermitParticipants() {
       birthDate,
       phone,
       companyName: candidate.companyName,
+      target: candidate.targetCode ?? null,
       targetLabel: candidate.targetLabel,
       vehicleNumber: candidate.vehicleNumber,
+      equipmentType: candidate.equipmentType ?? null,
       spec: candidate.spec,
       completedAt: candidate.completedAt,
       expiresAt: candidate.expiresAt,
@@ -97,7 +99,10 @@ export default function WorkPermitParticipants() {
       return;
     }
     writeDraft({ participants: list });
-    router.push('/work-permit/docs');
+    // 중장비·굴착 체크 시 장비 정보 확인 단계로, 아니면 필수서류로.
+    const supp = readDraft().supplemental ?? {};
+    const needEquip = supp.heavy === 'Y' || supp.excavation === 'Y';
+    router.push(needEquip ? '/work-permit/equipment' : '/work-permit/docs');
   };
 
   return (

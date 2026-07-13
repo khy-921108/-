@@ -46,6 +46,7 @@ export async function POST(req: Request) {
         status: result.status,
         name: result.name,
         companyName: result.companyName,
+        targetCode: result.targetCode, // 장비 대조용(HEAVY 등)
         targetLabel: result.targetLabel,
         vehicleNumber: result.vehicleNumber,
         spec: result.spec,

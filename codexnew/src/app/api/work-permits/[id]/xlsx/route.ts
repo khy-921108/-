@@ -21,7 +21,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     .select(
       `id, permit_number, request_company_id, request_company_name, work_name, work_location,
        work_start, work_end, work_content, applicant_name, applicant_title, applicant_phone,
-       equipment_no, supplemental, note, created_at, tbm,
+       equipment_no, supplemental, equipment, note, created_at, tbm,
        applicant_signature, issuer_title, issuer_signature, approved_by, approved_at,
        approver_name, approver_title, approver_signature, approval_mode, approver_signed_at,
        completion, dept_confirmations`
@@ -137,6 +137,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       equipmentNo: permit.equipment_no,
     },
     supplemental: permit.supplemental ?? {},
+    equipment: Array.isArray(permit.equipment) ? permit.equipment : [],
     participants: allParticipants.map((p) => ({ name: p.name, companyName: p.companyName })),
     note: permit.note,
     createdAt: permit.created_at,

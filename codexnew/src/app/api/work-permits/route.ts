@@ -159,6 +159,25 @@ export async function POST(req: Request) {
       );
     }
 
+    // ---- 3.4 중장비·장비 검증 (프론트 우회 방지) ----
+    //  중장비(heavy) 체크인데 HEAVY 교육 수료 참여자 0명 → 거부.
+    const heavyChecked = supplementalIn?.heavy === 'Y';
+    const heavyParts = evaluated.filter((e: any) => e.targetCode === 'HEAVY');
+    if (heavyChecked && heavyParts.length === 0) {
+      return NextResponse.json(
+        { success: false, code: 'NO_HEAVY_OPERATOR', message: '중장비 작업에는 중장비 교육을 수료한 기사가 1명 이상 필요합니다.' },
+        { status: 400 }
+      );
+    }
+    // 장비 스냅샷 — 차량번호 대조는 서버가 재계산(클라 matched 불신).
+    const normPlate = (s: any) => (typeof s === 'string' ? s.replace(/[\s-]/g, '').toUpperCase() : '');
+    const heavyPlates = heavyParts.map((e: any) => normPlate(e.vehicleNumber)).filter(Boolean);
+    const equipment = (Array.isArray(body.equipment) ? body.equipment : [])
+      .map((e: any) => ({ type: (e?.type ?? '').toString().trim(), vehicleNumber: (e?.vehicleNumber ?? '').toString().trim() }))
+      .filter((e: any) => e.type || e.vehicleNumber)
+      .slice(0, 20)
+      .map((e: any) => ({ ...e, matched: !!normPlate(e.vehicleNumber) && heavyPlates.includes(normPlate(e.vehicleNumber)) }));
+
     // ---- 3.5 필수서류(1C-2) 서버 재검증 (작업종료일 기준) ----
     //  각 참여자 유효 개인서약 + 업체 유효 이행각서(모든 참여자 커버). 클라 'docs 완료' 불신.
     const docPersons = participantsIn.map((p: any) => ({
@@ -253,6 +272,7 @@ export async function POST(req: Request) {
           equipment_no: equipmentNo,
           tbm,
           supplemental,
+          equipment, // 중장비·굴착 장비(종류·차량번호·대조결과)
           // R-6: 신청인 서명 + 승인자(요청부서 현장책임자) 정보. 승인자 서명은 후속 단계.
           applicant_signature: applicantSignature,
           approver_name: approverName,

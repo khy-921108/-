@@ -63,6 +63,8 @@ export default function WorkPermitConfirm() {
           // R-6 ③-3: 승인자/안전관리자/사진 미입력. 신청인 서명 + TBM 위험요인·안전대책만.
           approval: {},
           tbmDetail: draft.tbmDetail ?? {},
+          equipment: draft.equipment ?? [], // 중장비·굴착 장비 정보
+
           signatures: {
             applicant: applicantSig || undefined,
           },

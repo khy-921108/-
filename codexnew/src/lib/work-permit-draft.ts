@@ -11,12 +11,21 @@ export interface WpParticipant {
   phone: string;
   // 표시용 스냅샷(검증 결과)
   companyName?: string | null;
+  target?: string | null;       // 교육 대상 코드(TRUCK/WORKER/HEAVY 등) — 장비 대조용
   targetLabel?: string | null;
   vehicleNumber?: string | null;
+  equipmentType?: string | null; // 교육 등록 장비 종류(중장비)
   spec?: string | null;
   completedAt?: string | null;
   expiresAt?: string | null;
   marginDays?: number | null;
+}
+
+/** 중장비·굴착 작업 장비 항목 */
+export interface WpEquipment {
+  type: string;          // 장비 종류(예: 굴착기·지게차·크레인)
+  vehicleNumber: string; // 차량/장비 번호
+  matched: boolean;      // HEAVY 교육 수료자 등록 차량번호와 일치 여부
 }
 
 export interface WpDraft {
@@ -39,6 +48,8 @@ export interface WpDraft {
   };
   supplemental?: Record<string, 'Y' | 'N'>;
   participants?: WpParticipant[];
+  /** 중장비·굴착 장비 정보(해당 보충작업 체크 시) */
+  equipment?: WpEquipment[];
   // ===== R-6: 승인 규칙 / 디지털 서명 / TBM 상세 =====
   /** 승인자 = 요청·주관부서 현장 책임자(차장/대리). 서명은 후속 승인 단계에서 저장 가능. */
   approval?: {

@@ -189,6 +189,16 @@ export default function WorkPermitStart() {
             <p className="font-bold text-slate-700">규칙</p>
             <p>허가서는 <b>당일 하루만 유효</b>(매일 신청). 지난 허가서는 조회 화면의 <b>[같은 내용으로 재신청]</b>으로 간편하게.</p>
           </div>
+          <div className="rounded-lg bg-red-50 border border-red-200 p-3">
+            <p className="font-bold text-red-700">⚠ 위반 시 조치 (반드시 읽어주세요)</p>
+            <ul className="mt-1 list-disc pl-4 space-y-0.5 text-slate-700">
+              <li>작업허가서 없이 작업 → 즉시 작업 중지 + 당일 퇴출</li>
+              <li>안전보호구(안전모·안전화 등) 미착용 → 1차·2차 경고, 3회째 퇴출 (경고는 연간 누적)</li>
+              <li>TBM(사진·전원 서명) 없이 작업 → 즉시 작업 중지, TBM 완료 후 재개</li>
+              <li>서명 대리·허위 기재 → 해당 허가서 무효 + 출입 제한</li>
+            </ul>
+            <p className="mt-1 text-xs text-red-600">※ 위반이 반복되는 업체는 공장 출입 및 향후 계약이 제한될 수 있습니다.</p>
+          </div>
         </div>
       </details>
 

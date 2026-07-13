@@ -6,9 +6,10 @@ import { useState } from 'react';
 export default function ConsentPage() {
   const router = useRouter();
   const [agreed, setAgreed] = useState(false);
+  const [safetyAck, setSafetyAck] = useState(false);
 
   const handleNext = () => {
-    if (!agreed) return;
+    if (!agreed || !safetyAck) return;
     sessionStorage.setItem('consent', 'Y');
     router.push('/register');
   };
@@ -83,6 +84,27 @@ export default function ConsentPage() {
         </div>
       </section>
 
+      {/* 동남 울산공장 안전수칙 — 교육 시작 전 필수 확인 */}
+      <section className="card bg-amber-50 border-2 border-amber-200 text-sm leading-relaxed text-slate-700 space-y-2">
+        <h2 className="font-bold text-amber-800">🏭 동남 울산공장 안전수칙 (교육 시작 전 확인)</h2>
+        <ul className="list-disc pl-5 space-y-1">
+          <li>공장 안에서는 안전보호구(안전모·안전화)를 반드시 착용합니다.</li>
+          <li>보호구 미착용 적발 시 1차·2차 경고, 3회째부터 퇴출됩니다 (경고 연간 누적).</li>
+          <li>지정 통로로 다니고, 현장의 안전 지시에 반드시 따릅니다.</li>
+          <li>화기·고소·밀폐·전기·중장비·굴착 등 위험작업은 작업허가서 없이 절대 작업할 수 없습니다 (위반 시 즉시 중지 + 당일 퇴출).</li>
+          <li>위반이 반복되면 공장 출입이 제한될 수 있습니다.</li>
+        </ul>
+        <label className="flex items-center gap-3 mt-1 p-3 rounded-xl bg-white border border-amber-300 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={safetyAck}
+            onChange={(e) => setSafetyAck(e.target.checked)}
+            className="h-5 w-5 accent-amber-500"
+          />
+          <span className="font-bold text-slate-800">위 안전수칙을 확인했습니다 <span className="text-red-500">(필수)</span></span>
+        </label>
+      </section>
+
       <label className="flex items-center gap-3 p-4 rounded-xl bg-white border border-slate-200 cursor-pointer">
         <input
           type="checkbox"
@@ -98,7 +120,7 @@ export default function ConsentPage() {
       <button
         type="button"
         onClick={handleNext}
-        disabled={!agreed}
+        disabled={!agreed || !safetyAck}
         className="btn-primary"
       >
         다음

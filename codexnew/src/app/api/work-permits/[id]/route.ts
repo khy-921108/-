@@ -22,7 +22,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       `id, permit_number, permit_type, status, request_company_id, request_company_name,
        work_name, work_location, work_start, work_end, work_content,
        applicant_name, applicant_phone, applicant_title, equipment_no,
-       tbm, supplemental, note, created_at,
+       tbm, supplemental, equipment, note, created_at,
        applicant_signature, issuer_title, issuer_signature, approved_by, approved_at,
        approver_name, approver_title, approver_signature, approval_mode, approver_signed_at,
        completion, dept_confirmations, started_by, started_at, rollback_logs`
@@ -159,6 +159,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
         equipmentNo: permit.equipment_no,
       },
       supplemental: permit.supplemental ?? {},
+      equipment: Array.isArray(permit.equipment) ? permit.equipment : [],
       tbm: safeTbm, // 정화됨(전화번호·이메일 제거)
       // R-6: 신청인 서명 / 발급자(안전환경) / 승인자(요청부서 현장책임자) / 작업완료
       applicantSignature: permit.applicant_signature ?? null,

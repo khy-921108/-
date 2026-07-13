@@ -361,7 +361,7 @@ export default function WorkPermitDocs() {
           {error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
           <div className="flex gap-2">
-            <button type="button" onClick={() => router.push('/work-permit/participants')} className="btn-secondary">이전</button>
+            <button type="button" onClick={() => { const s = readDraft().supplemental ?? {}; router.push((s.heavy === 'Y' || s.excavation === 'Y') ? '/work-permit/equipment' : '/work-permit/participants'); }} className="btn-secondary">이전</button>
             <button
               type="button"
               onClick={() => router.push('/work-permit/confirm')}

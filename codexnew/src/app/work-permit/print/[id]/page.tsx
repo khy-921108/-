@@ -57,6 +57,7 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
 
   const info = data.info ?? {};
   const supp = data.supplemental ?? {};
+  const equipment: any[] = Array.isArray(data.equipment) ? data.equipment : [];
   const tbm = data.tbm ?? {};
   const comp = data.completion ?? {};
   const dept = data.deptConfirmations ?? {};
@@ -189,6 +190,16 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
           <tr><th>작업장소·설비</th><td colSpan={3}>[업체] {data.companyName}　작업지역: {info.workLocation}{info.equipmentNo ? `　/ 장치: ${info.equipmentNo}` : ''}</td></tr>
           <tr><th>작업개요</th><td colSpan={3}>{info.workContent}</td></tr>
           <tr><th>보충작업</th><td colSpan={3}><div className="supp">{SUPPLEMENTAL_WORKS.map((w) => <span key={w.key}>{supp[w.key] === 'Y' ? '■' : '□'} {w.label}</span>)}</div></td></tr>
+          {equipment.length > 0 && (
+            <tr><th>장비</th><td colSpan={3}>
+              {equipment.map((eq, i) => (
+                <span key={i} style={{ marginRight: 12 }}>
+                  🚜 {eq.type || '장비'}{eq.vehicleNumber ? ` ${eq.vehicleNumber}` : ''}
+                  {eq.vehicleNumber ? (eq.matched ? ' ✅' : ' ⚠불일치') : ''}
+                </span>
+              ))}
+            </td></tr>
+          )}
         </tbody></table>
 
         <div className="sec">안전조치 요구사항 <span className="muted">(발급자 현장 확인·수기)</span></div>
