@@ -23,6 +23,14 @@ export default function AdminSettingsPage() {
   const [guideBusy, setGuideBusy] = useState(false);
   const [guideMsg, setGuideMsg] = useState('');
 
+  // 백업 조회 월 (YYYY-MM) — 기본 이번 달, 과거 무제한, 미래는 이번 달까지
+  const _pad = (n: number) => String(n).padStart(2, '0');
+  const _ym = (d: Date) => `${d.getFullYear()}-${_pad(d.getMonth() + 1)}`;
+  const thisMonth = _ym(new Date());
+  const [bmonth, setBmonth] = useState(thisMonth);
+  const shiftM = (ym: string, delta: number) => { const [y, m] = ym.split('-').map(Number); return _ym(new Date(y, m - 1 + delta, 1)); };
+  const [by, bm] = bmonth.split('-');
+
   const load = async () => {
     try {
       const res = await fetch('/api/admin/me', { cache: 'no-store' });
@@ -110,12 +118,31 @@ export default function AdminSettingsPage() {
       {role === 'SUPER' && (
         <section className="card space-y-3 border-2 border-slate-300">
           <h2 className="font-bold text-slate-800">📦 전체 백업 다운로드 <span className="text-xs font-normal text-slate-500">(최고관리자 전용)</span></h2>
-          <p className="text-xs text-slate-500">산업안전보건법 <b>서류 3년 보존</b> 대응. Supabase 무료 플랜은 자동 백업이 없어 이 백업이 실질 보존 수단입니다.</p>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <a href="/api/admin/backup/data" className="flex-1 text-center rounded-xl bg-brand text-white px-5 py-4 text-base font-bold shadow active:scale-95">📄 데이터 백업</a>
-            <a href="/api/admin/backup/photos" className="flex-1 text-center rounded-xl bg-slate-700 text-white px-5 py-4 text-base font-bold shadow active:scale-95">🖼 사진 백업</a>
+          <p className="text-xs text-slate-500">산업안전보건법 <b>서류 3년 보존</b> 대응. Supabase 무료 플랜은 자동 백업이 없어 이 백업이 실질 보존 수단입니다. <b>매월 그 달치</b>를 받아 NAS에 보관하세요.</p>
+
+          {/* 조회 월 선택기 */}
+          <div className="flex items-center justify-center gap-3">
+            <button onClick={() => setBmonth((m) => shiftM(m, -1))} className="h-9 w-9 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 text-lg leading-none" aria-label="이전 달">◀</button>
+            <span className="text-base font-bold text-slate-800 w-32 text-center">{by}년 {Number(bm)}월</span>
+            <button onClick={() => setBmonth((m) => (m < thisMonth ? shiftM(m, 1) : m))} disabled={bmonth >= thisMonth} className="h-9 w-9 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-30 text-lg leading-none" aria-label="다음 달">▶</button>
           </div>
-          <p className="text-[11px] text-slate-400">※ 데이터(수료·업체·허가서·서약·각서 · 엑셀+JSON)와 TBM 현장사진을 나눠 받습니다. 생성에 수십 초 걸릴 수 있어요.</p>
+
+          <div className="flex flex-col sm:flex-row gap-2">
+            <a href={`/api/admin/backup/data?month=${bmonth}`} className="flex-1 text-center rounded-xl bg-brand text-white px-5 py-4 text-base font-bold shadow active:scale-95">📄 이 달 데이터 백업</a>
+            <a href={`/api/admin/backup/photos?month=${bmonth}`} className="flex-1 text-center rounded-xl bg-slate-700 text-white px-5 py-4 text-base font-bold shadow active:scale-95">🖼 이 달 사진 백업</a>
+          </div>
+          <p className="text-[11px] text-slate-400">※ 데이터 zip엔 <b>허가서양식/</b> 폴더에 그 달 허가서가 회사양식 xlsx로 건별 들어갑니다(+수료·업체·서약·각서 JSON·엑셀). 생성에 수십 초 걸릴 수 있어요.</p>
+
+          {/* 많을 때: 반기 분할 다운로드(기본 접힘) */}
+          <details className="text-sm">
+            <summary className="cursor-pointer text-xs font-bold text-slate-500 select-none">건수가 많아 시간이 오래 걸리면 — 반기 분할 다운로드</summary>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <a href={`/api/admin/backup/data?month=${bmonth}&half=H1`} className="text-center rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">📄 전반기(1~15일) 데이터</a>
+              <a href={`/api/admin/backup/data?month=${bmonth}&half=H2`} className="text-center rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">📄 후반기(16~말일) 데이터</a>
+              <a href={`/api/admin/backup/photos?month=${bmonth}&half=H1`} className="text-center rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">🖼 전반기 사진</a>
+              <a href={`/api/admin/backup/photos?month=${bmonth}&half=H2`} className="text-center rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">🖼 후반기 사진</a>
+            </div>
+          </details>
 
           <div className="rounded-lg bg-amber-50 border border-amber-200 p-2 space-y-2">
             <p className="text-xs font-bold text-amber-800">보관 안내 문구 (버튼 옆 표시 — 수정 가능)</p>

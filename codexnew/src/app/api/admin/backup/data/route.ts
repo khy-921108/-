@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
-import { fetchAllRows, kstStamp, addSheet, zipHeaders } from '@/lib/backup';
+import { fetchFiltered, resolveMonth, monthRange, kstStamp, addSheet, zipHeaders } from '@/lib/backup';
+import { generateWorkPermitXlsx } from '@/lib/work-permit-xlsx';
+import { normalizePhone } from '@/lib/equipment';
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
 
@@ -11,74 +13,98 @@ export const fetchCache = 'force-no-store';
 export const maxDuration = 60;
 
 /**
- * GET /api/admin/backup/data  (SUPER 전용)
- * 전체 데이터 백업 zip — 개인정보 포함이라 SUPER만. (사진은 별도 /photos 라우트)
- *  · JSON 원본(전 컬럼) + 엑셀(주요 목록) + 백업요약.txt
- * 산업안전보건법 3년 보존 대응 수단(Supabase 무료 플랜 자동백업 없음).
+ * GET /api/admin/backup/data?month=YYYY-MM[&half=H1|H2]  (SUPER 전용)
+ * 선택 월에 작업예정일이 걸치는 허가서 + 관련 수료·업체·서약·각서 백업 zip.
+ *  · json/ 원본(전 컬럼) · 엑셀/데이터.xlsx 요약 · 허가서양식/{허가번호}.xlsx 건별(회사양식) · 백업요약.txt
+ * 산업안전보건법 3년 보존 대응(Supabase 무료 플랜 자동백업 없음). 사진은 별도 /photos.
  */
-export async function GET() {
+export async function GET(req: Request) {
   const auth = await requireSuperAdmin();
   if (!auth.ok) return auth.response;
   const supabase = createServiceClient();
 
+  const url = new URL(req.url);
+  const month = resolveMonth(url.searchParams.get('month'));
+  const half = (['H1', 'H2'].includes(url.searchParams.get('half') || '') ? url.searchParams.get('half') : null) as 'H1' | 'H2' | null;
+  const { startIso, endIso, label } = monthRange(month, half);
+
   try {
-    const [completions, sessions, companies, permits, participants, pledges, undertakings] = await Promise.all([
-      fetchAllRows(supabase, 'completions'),
-      fetchAllRows(supabase, 'training_sessions'),
-      fetchAllRows(supabase, 'companies'),
-      fetchAllRows(supabase, 'work_permits'),
-      fetchAllRows(supabase, 'work_permit_participants'),
-      fetchAllRows(supabase, 'safety_pledges'),
-      fetchAllRows(supabase, 'company_undertakings'),
-    ]);
+    // 선택 범위와 작업기간(work_start~work_end)이 겹치는 허가서
+    const permits = await fetchFiltered(supabase, 'work_permits', '*', (q) =>
+      q.lte('work_start', endIso).gte('work_end', startIso).order('work_start', { ascending: true })
+    );
+    const permitIds = permits.map((p: any) => p.id);
+    const companyIds = Array.from(new Set(permits.map((p: any) => p.request_company_id).filter(Boolean)));
+
+    const participants = permitIds.length
+      ? await fetchFiltered(supabase, 'work_permit_participants', '*', (q) => q.in('work_permit_id', permitIds)) : [];
+    const companies = companyIds.length
+      ? await fetchFiltered(supabase, 'companies', '*', (q) => q.in('id', companyIds)) : [];
+    const pledges = companyIds.length
+      ? await fetchFiltered(supabase, 'safety_pledges', '*', (q) => q.in('company_id', companyIds)) : [];
+    const undertakings = companyIds.length
+      ? await fetchFiltered(supabase, 'company_undertakings', '*', (q) => q.in('company_id', companyIds)) : [];
+
+    // 수료: 참여자(이름+정규화전화)로 training_sessions → completions 매칭
+    const phones = Array.from(new Set(participants.map((p: any) => normalizePhone(p.phone)).filter(Boolean)));
+    let sessions: any[] = [];
+    let completions: any[] = [];
+    if (phones.length) {
+      const cand = await fetchFiltered(supabase, 'training_sessions', 'id, name, phone, birth_date, affiliation, company_id', (q) => q.in('phone', phones));
+      const pset = new Set(participants.map((p: any) => `${(p.name ?? '').trim()}|${normalizePhone(p.phone)}`));
+      sessions = cand.filter((s: any) => pset.has(`${(s.name ?? '').trim()}|${normalizePhone(s.phone)}`));
+      const sessIds = sessions.map((s: any) => s.id);
+      if (sessIds.length) completions = await fetchFiltered(supabase, 'completions', '*', (q) => q.in('session_id', sessIds));
+    }
+
+    const tooMany = !half && permits.length > 150;
 
     const zip = new JSZip();
-    // ── 원본 JSON(전 컬럼: 서명·장비·되돌리기 이력·종료 기록 전부 포함) ──
-    zip.file('json/completions.json', JSON.stringify(completions, null, 2));
-    zip.file('json/training_sessions.json', JSON.stringify(sessions, null, 2));
-    zip.file('json/companies.json', JSON.stringify(companies, null, 2));
     zip.file('json/work_permits.json', JSON.stringify(permits, null, 2));
     zip.file('json/work_permit_participants.json', JSON.stringify(participants, null, 2));
+    zip.file('json/companies.json', JSON.stringify(companies, null, 2));
     zip.file('json/safety_pledges.json', JSON.stringify(pledges, null, 2));
     zip.file('json/company_undertakings.json', JSON.stringify(undertakings, null, 2));
+    zip.file('json/completions.json', JSON.stringify(completions, null, 2));
+    zip.file('json/training_sessions.json', JSON.stringify(sessions, null, 2));
 
-    // ── 엑셀(주요 목록) ──
+    // 엑셀 요약
     const wb = new ExcelJS.Workbook();
-    addSheet(wb, '수료(completions)', completions);
-    addSheet(wb, '인원(training_sessions)', sessions);
-    addSheet(wb, '업체(companies)', companies);
     addSheet(wb, '작업허가(요약)', permits.map((p: any) => ({
-      permit_number: p.permit_number, status: p.status,
-      company: p.request_company_name, work_name: p.work_name,
-      work_start: p.work_start, work_end: p.work_end,
-      applicant: p.applicant_name, started_at: p.started_at,
-      created_at: p.created_at,
+      permit_number: p.permit_number, status: p.status, company: p.request_company_name,
+      work_name: p.work_name, work_start: p.work_start, work_end: p.work_end,
+      applicant: p.applicant_name, started_at: p.started_at, created_at: p.created_at,
     })));
-    addSheet(wb, '서약(safety_pledges)', pledges);
+    addSheet(wb, '수료(completions)', completions);
+    addSheet(wb, '업체(companies)', companies);
+    addSheet(wb, '서약(pledges)', pledges);
     addSheet(wb, '이행각서(undertakings)', undertakings);
     const xbuf = await wb.xlsx.writeBuffer();
     zip.file('엑셀/데이터.xlsx', Buffer.from(xbuf as ArrayBuffer));
 
-    // ── 요약 ──
-    const { ymd, full } = kstStamp();
-    const summary =
-      `동남 울산공장 안전교육/작업허가 데이터 백업\n` +
-      `생성 시각: ${full} (KST) · 생성자: ${auth.admin.email}\n` +
+    // 허가서양식/ — 그 달 허가서를 회사양식 xlsx로 건별 생성
+    let formOk = 0, formFail = 0;
+    for (const p of permits) {
+      try {
+        const out = await generateWorkPermitXlsx(supabase, p.id);
+        if (out) { zip.file(`허가서양식/${out.permitNumber}.xlsx`, new Uint8Array(out.buffer)); formOk++; }
+        else formFail++;
+      } catch (e) { formFail++; console.error('[backup/data form]', p.permit_number, e); }
+    }
+
+    const { full } = kstStamp();
+    zip.file('백업요약.txt',
+      `동남 울산공장 월별 데이터 백업\n대상 월: ${label}\n생성 시각: ${full} (KST) · 생성자: ${auth.admin.email}\n` +
       `----------------------------------------\n` +
-      `수료 기록(completions): ${completions.length}건\n` +
-      `인원 명단(training_sessions): ${sessions.length}건\n` +
-      `업체(companies): ${companies.length}건\n` +
-      `작업허가서(work_permits): ${permits.length}건\n` +
-      `작업허가 참여자(participants): ${participants.length}건\n` +
-      `개인서약(safety_pledges): ${pledges.length}건\n` +
-      `업체 이행각서(company_undertakings): ${undertakings.length}건\n` +
+      `작업허가서: ${permits.length}건 (회사양식 xlsx 생성 ${formOk} · 실패 ${formFail})\n` +
+      `참여자: ${participants.length} · 업체: ${companies.length} · 수료: ${completions.length} · 서약: ${pledges.length} · 각서: ${undertakings.length}\n` +
       `----------------------------------------\n` +
-      `※ 이 파일은 데이터 백업입니다. TBM 현장 사진은 [사진 백업] 버튼으로 별도 다운로드하세요.\n` +
-      `※ 산업안전보건법 서류 3년 보존 대응. 회사 NAS(안전환경부서자료)에 보관하세요.\n`;
-    zip.file('백업요약.txt', summary);
+      (tooMany ? '⚠ 대상이 150건을 넘습니다. 시간이 오래 걸리면 [전반기/후반기 분할 다운로드]를 이용하세요.\n' : '') +
+      `※ TBM 현장 사진은 [이 달 사진 백업]으로 별도. 매월 그 달치를 받아 회사 NAS(안전환경부서자료)에 보관하세요.\n`
+    );
 
     const buf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
-    return new Response(new Uint8Array(buf), { headers: zipHeaders(`safety-edu-데이터백업-${ymd}.zip`) });
+    return new Response(new Uint8Array(buf), { headers: zipHeaders(`safety-edu-데이터백업-${label}.zip`) });
   } catch (e: any) {
     console.error('[backup/data]', e);
     return NextResponse.json({ success: false, code: 'BACKUP_FAILED', message: e?.message ?? '백업 생성 실패' }, { status: 500 });

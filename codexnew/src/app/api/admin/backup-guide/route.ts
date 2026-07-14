@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 
 const KEY = 'BACKUP_GUIDE';
-const DEFAULT_GUIDE = '매월 1회 다운로드해 회사 NAS(안전환경부서자료 폴더)에 복사하세요. 서류 3년 보존 의무 대응.';
+const DEFAULT_GUIDE = '매월 그 달치를 다운로드해 회사 NAS(안전환경부서자료 폴더)에 보관하세요. 서류 3년 보존 의무 대응.';
 
 /** GET — 백업 안내 문구 조회(관리자). */
 export async function GET() {
