@@ -124,6 +124,14 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     );
   }
 
+  // 🔴 개시 후 TBM 변경 차단(사진·서명·제출). 개시 전에는 자유.
+  if (['photo', 'confirm', 'submit'].includes(action) && permit.started_at) {
+    return NextResponse.json(
+      { success: false, code: 'ALREADY_STARTED', message: '작업이 개시되어 TBM을 변경할 수 없습니다.' },
+      { status: 409 }
+    );
+  }
+
   // ── photo: 사진 1장 업로드 ──
   if (action === 'photo') {
     const image = (body?.image ?? '').toString();

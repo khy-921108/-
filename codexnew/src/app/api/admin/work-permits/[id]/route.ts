@@ -110,6 +110,15 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     }
   }
 
+  // 🔴 개시 후 승인 기록 잠금: 이미 개시/완료된 허가서는 승인 서명(1·2·3차) 변경 불가.
+  //  개시 후 수정은 오직 "되돌리기"(사유·이력 남는 경로)로만 가능하게 일원화.
+  if (['issue', 'witness', 'dept_confirm', 'dept_proxy'].includes(action)) {
+    const comp0 = (permit.completion ?? {}) as Record<string, any>;
+    if (permit.started_at || permit.status === 'COMPLETED' || isSig(comp0.confirmSignature)) {
+      return fail('LOCKED_AFTER_START', '작업이 개시된 허가서는 승인 기록을 변경할 수 없습니다. 필요하면 이전 단계로 되돌리기를 사용하세요.', 409);
+    }
+  }
+
   // ===== ③-2a =====
   if (action === 'issue') {
     if (!hasApprove) return forbidden();
@@ -195,11 +204,21 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     if (!hasApprove) return forbidden();
     const comp = (permit.completion ?? {}) as Record<string, any>;
     if (!comp.workerSignature) return fail('ORDER_VIOLATION', '종료신고를 먼저 완료해야 합니다.', 409);
+    // ②: 이미 종료확인된 건 덮어쓰기 금지.
+    if (isSig(comp.confirmSignature) || permit.status === 'COMPLETED') {
+      return fail('ALREADY_CONFIRMED', '이미 종료확인이 완료된 허가서입니다.', 409);
+    }
     comp.confirmSignature = signature;
     comp.confirmBy = actor;
     comp.confirmAt = now;
-    const { error } = await patchPermit({ completion: comp, status: 'COMPLETED' });
+    // 조건부 업데이트(경합 방지): status != COMPLETED 일 때만 성공.
+    const { data: upd, error } = (await withTimeout(
+      supabase.from('work_permits').update({ completion: comp, status: 'COMPLETED' })
+        .eq('id', ctx.params.id).neq('status', 'COMPLETED').select('id'),
+      'confirm-update'
+    )) as { data: any[] | null; error: any };
     if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
+    if (!upd || upd.length === 0) return fail('ALREADY_CONFIRMED', '이미 종료확인됨(동시 처리).', 409);
     return NextResponse.json({ success: true, data: { action, by: actor, at: now, status: 'COMPLETED' } });
   }
 

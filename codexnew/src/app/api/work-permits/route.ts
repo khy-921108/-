@@ -5,7 +5,7 @@ import { generateWorkPermitNumber } from '@/lib/work-permit-number';
 import { SUPPLEMENTAL_KEYS } from '@/lib/work-permit-constants';
 import { evaluateRequiredDocs } from '@/lib/safety-doc-status';
 import { sendSms } from '@/lib/sms';
-import { isValidSignature, isValidPhoto } from '@/lib/upload-validate';
+import { isValidSignature, isValidPhoto, MAX_PHOTO_BYTES } from '@/lib/upload-validate';
 
 export const runtime = 'nodejs';
 
@@ -342,14 +342,16 @@ export async function POST(req: Request) {
     if (photoDataUrls.length > 0) {
       const paths: string[] = [];
       for (let i = 0; i < photoDataUrls.length; i++) {
-        const m = photoDataUrls[i].match(/^data:image\/(\w+);base64,(.+)$/);
+        const m = photoDataUrls[i].match(/^data:image\/(png|jpe?g|webp);base64,(.+)$/);
         if (!m) continue;
-        const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+        const mime = m[1] === 'jpg' ? 'jpeg' : m[1];
+        const ext = mime === 'jpeg' ? 'jpg' : mime;
         const buf = Buffer.from(m[2], 'base64');
+        if (buf.length > MAX_PHOTO_BYTES) continue; // ⑤ decoded 용량 상한(5MB) 초과분 제외
         const key = `permits/${permit.id}/${i}.${ext}`;
         const { error: upErr } = await supabase.storage
           .from('work-permit-photos')
-          .upload(key, buf, { contentType: `image/${m[1]}`, upsert: true });
+          .upload(key, buf, { contentType: `image/${mime}`, upsert: true });
         if (upErr) {
           console.error('[work-permits POST] photo upload failed:', upErr);
         } else {
