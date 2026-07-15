@@ -9,6 +9,8 @@ interface WpResult {
   permitNumber: string;
   status: string;
   createdAt: string;
+  excludedPhotos?: number;
+  excludedReasons?: string[];
 }
 
 export default function WorkPermitResult() {
@@ -57,6 +59,12 @@ export default function WorkPermitResult() {
           <p className="text-2xl font-extrabold text-brand tracking-wider">{result.permitNumber}</p>
         </div>
       </div>
+
+      {!!(result.excludedPhotos && result.excludedPhotos > 0) && (
+        <div className="rounded-xl bg-amber-50 border border-amber-300 p-3 text-sm text-amber-800">
+          ⚠️ 첨부 사진 <b>{result.excludedPhotos}장이 제외</b>되었습니다{result.excludedReasons?.length ? ` (${result.excludedReasons.join(', ')})` : ''}. 필요하면 현장 TBM 화면에서 다시 올려주세요.
+        </div>
+      )}
 
       {sig && (
         sig.unsigned.length === 0 ? (

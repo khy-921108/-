@@ -115,7 +115,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   if (['issue', 'witness', 'dept_confirm', 'dept_proxy'].includes(action)) {
     const comp0 = (permit.completion ?? {}) as Record<string, any>;
     if (permit.started_at || permit.status === 'COMPLETED' || isSig(comp0.confirmSignature)) {
-      return fail('LOCKED_AFTER_START', '작업이 개시된 허가서는 승인 기록을 변경할 수 없습니다. 필요하면 이전 단계로 되돌리기를 사용하세요.', 409);
+      return fail('LOCKED_AFTER_START', '작업이 개시된 허가서는 승인 기록을 변경할 수 없습니다.', 409);
     }
   }
 

@@ -23,6 +23,11 @@ export default function AdminSettingsPage() {
   const [guideBusy, setGuideBusy] = useState(false);
   const [guideMsg, setGuideMsg] = useState('');
 
+  // 홈 공지(SUPER)
+  const [notice, setNotice] = useState('');
+  const [noticeBusy, setNoticeBusy] = useState(false);
+  const [noticeMsg, setNoticeMsg] = useState('');
+
   // 백업 조회 월 (YYYY-MM) — 기본 이번 달, 과거 무제한, 미래는 이번 달까지
   const _pad = (n: number) => String(n).padStart(2, '0');
   const _ym = (d: Date) => `${d.getFullYear()}-${_pad(d.getMonth() + 1)}`;
@@ -51,6 +56,22 @@ export default function AdminSettingsPage() {
     fetch('/api/admin/backup-guide', { cache: 'no-store' })
       .then((r) => r.json()).then((j) => { if (j.success) setGuide(j.data.guide); }).catch(() => {});
   }, []);
+  useEffect(() => {
+    fetch('/api/admin/home-notice', { cache: 'no-store' })
+      .then((r) => r.json()).then((j) => { if (j.success) setNotice(j.data.notice ?? ''); }).catch(() => {});
+  }, []);
+
+  const saveNotice = async (body: string) => {
+    setNoticeBusy(true); setNoticeMsg('');
+    try {
+      const res = await fetch('/api/admin/home-notice', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notice: body }),
+      });
+      const j = await res.json();
+      if (j.success) { setNotice(j.data.notice ?? ''); setNoticeMsg(body.trim() ? '공지 저장됨' : '공지를 내렸습니다.'); }
+      else setNoticeMsg(j.message || '저장 실패');
+    } catch { setNoticeMsg('네트워크 오류'); } finally { setNoticeBusy(false); }
+  };
 
   const saveGuide = async () => {
     setGuideBusy(true); setGuideMsg('');
@@ -113,6 +134,28 @@ export default function AdminSettingsPage() {
       {msg && <div className="card bg-slate-50 text-sm text-slate-700">{msg}</div>}
 
       <button onClick={save} disabled={saving} className="btn-primary w-full">{saving ? '저장 중…' : '저장'}</button>
+
+      {/* 홈 공지 — 최고관리자 전용 */}
+      {role === 'SUPER' && (
+        <section className="card space-y-3 border-2 border-amber-200">
+          <h2 className="font-bold text-slate-800">📢 홈 공지 <span className="text-xs font-normal text-slate-500">(최고관리자 전용)</span></h2>
+          <p className="text-xs text-slate-500">홈 화면 맨 위에 배너로 표시됩니다. 비우고 저장하면 공지가 내려갑니다. (최대 200자)</p>
+          <textarea
+            className="input-base text-sm min-h-[80px]"
+            maxLength={200}
+            value={notice}
+            onChange={(e) => setNotice(e.target.value)}
+            placeholder="예: 7/20(월) 정기 안전점검으로 오전 출입이 제한됩니다."
+          />
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] text-slate-400">{noticeMsg}</span>
+            <div className="flex gap-2">
+              <button onClick={() => saveNotice('')} disabled={noticeBusy} className="text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 disabled:opacity-50">공지 내리기</button>
+              <button onClick={() => saveNotice(notice)} disabled={noticeBusy} className="text-xs font-bold px-3 py-1.5 rounded-lg bg-brand text-white disabled:opacity-50">{noticeBusy ? '저장 중…' : '저장'}</button>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* 전체 백업 — 최고관리자 전용 (개인정보 전체 포함) */}
       {role === 'SUPER' && (

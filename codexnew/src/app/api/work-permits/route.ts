@@ -5,7 +5,7 @@ import { generateWorkPermitNumber } from '@/lib/work-permit-number';
 import { SUPPLEMENTAL_KEYS } from '@/lib/work-permit-constants';
 import { evaluateRequiredDocs } from '@/lib/safety-doc-status';
 import { sendSms } from '@/lib/sms';
-import { isValidSignature, isValidPhoto, MAX_PHOTO_BYTES } from '@/lib/upload-validate';
+import { isValidSignature, isValidPhoto, MAX_PHOTO_BYTES, dataUrlBytes } from '@/lib/upload-validate';
 
 export const runtime = 'nodejs';
 
@@ -247,7 +247,15 @@ export async function POST(req: Request) {
       // 사진은 Storage 업로드 후 경로로 채운다(아래). 초기엔 빈 배열.
       photos: [] as string[],
     };
-    const photoDataUrls = photosIn.filter(isValidPhoto).slice(0, 2);
+    // 사진 검증 — 조용히 버리지 않고 제외 사유를 모아 응답에 안내.
+    const excludedPhotos: string[] = [];
+    const photoDataUrls: string[] = [];
+    for (const ph of photosIn.slice(0, 10)) {
+      if (photoDataUrls.length >= 2) { excludedPhotos.push('최대 2장 초과'); continue; }
+      if (!isValidPhoto(ph)) { excludedPhotos.push('형식 불일치(PNG·JPG·WEBP만)'); continue; }
+      if (dataUrlBytes(ph) > MAX_PHOTO_BYTES) { excludedPhotos.push('5MB 초과'); continue; }
+      photoDataUrls.push(ph);
+    }
 
     // ---- 6. 신청번호 RPC + 충돌 재시도(≤3) → work_permits INSERT ----
     let permit: any = null;
@@ -385,6 +393,8 @@ export async function POST(req: Request) {
         permitNumber: permit.permit_number,
         status: permit.status,
         createdAt: permit.created_at,
+        excludedPhotos: excludedPhotos.length,
+        excludedReasons: Array.from(new Set(excludedPhotos)),
       },
     });
   } catch (e) {

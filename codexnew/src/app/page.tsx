@@ -1,8 +1,10 @@
 import Link from 'next/link';
+import HomeNotice from '@/components/HomeNotice';
 
 export default function HomePage() {
   return (
     <main className="flex flex-col items-center justify-center min-h-[80vh] text-center">
+      <div className="w-full"><HomeNotice /></div>
       <div className="mb-8">
         <div className="inline-block rounded-full bg-brand/10 px-4 py-2 text-sm font-bold text-brand">
           SAFETY EDUCATION
