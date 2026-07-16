@@ -3,7 +3,8 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { readDraft, writeDraft } from '@/lib/work-permit-draft';
-import { companyTypeLabel } from '@/lib/company';
+import { companyTypeLabel, companyFieldRules, COMPANY_TYPES, type CompanyType } from '@/lib/company';
+import BizNoField from '@/components/BizNoField';
 
 interface CompanySummary {
   id: string;
@@ -29,7 +30,14 @@ export default function WorkPermitStart() {
   const [results, setResults] = useState<CompanySummary[]>([]);
   const [searching, setSearching] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [newType, setNewType] = useState<CompanyType>('GENERAL');
   const [newName, setNewName] = useState('');
+  const [newPersonName, setNewPersonName] = useState(''); // 개인작업자 이름 → "개인(이름)"
+  const [newManager, setNewManager] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newBizNo, setNewBizNo] = useState('');
+  const [newAddress, setNewAddress] = useState('');
+  const [newTel, setNewTel] = useState('');
   const [newLoading, setNewLoading] = useState(false);
   const [newErr, setNewErr] = useState('');
 
@@ -122,10 +130,17 @@ export default function WorkPermitStart() {
     writeDraft({ company: comp });
   };
 
+  const newRules = companyFieldRules(newType);
+  const composedName = newRules.isIndividual ? (newPersonName.trim() ? `개인(${newPersonName.trim()})` : '') : newName.trim();
+
   const submitNewCompany = async () => {
     setNewErr('');
-    if (!newName.trim()) {
-      setNewErr('업체명을 입력해 주세요.');
+    if (!composedName) {
+      setNewErr(newRules.isIndividual ? '이름을 입력해 주세요.' : '업체명을 입력해 주세요.');
+      return;
+    }
+    if (newRules.managerRequired && (!newManager.trim() || newPhone.replace(/\D/g, '').length < 9)) {
+      setNewErr('담당자명과 연락처를 입력해 주세요.');
       return;
     }
     setNewLoading(true);
@@ -133,7 +148,15 @@ export default function WorkPermitStart() {
       const res = await fetch('/api/companies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName.trim() }),
+        body: JSON.stringify({
+          name: composedName,
+          companyType: newType,
+          managerName: newRules.showManager ? newManager.trim() : '',
+          phone: newRules.showManager ? newPhone : '',
+          bizNo: newRules.showBizFields ? newBizNo : '',
+          address: newRules.showBizFields && !newRules.isIndividual ? newAddress.trim() : '',
+          tel: newRules.showBizFields && !newRules.isIndividual ? newTel : '',
+        }),
       });
       const json = await res.json();
       if (!json.success) {
@@ -141,7 +164,7 @@ export default function WorkPermitStart() {
         return;
       }
       selectCompany(json.data as CompanySummary);
-      setNewName('');
+      setNewName(''); setNewPersonName(''); setNewManager(''); setNewPhone(''); setNewBizNo(''); setNewAddress(''); setNewTel('');
     } catch (e) {
       console.error(e);
       setNewErr('네트워크 오류가 발생했습니다.');
@@ -286,8 +309,64 @@ export default function WorkPermitStart() {
                   </button>
                 ) : (
                   <div className="rounded-xl border-2 border-brand/40 bg-white p-4 space-y-3">
-                    <label className="label">업체명 *</label>
-                    <input className="input-base" value={newName} onChange={(e) => setNewName(e.target.value)} />
+                    <p className="text-[11px] text-slate-500 rounded-lg bg-slate-50 p-2">
+                      순서: <b>업체 검색 → 있으면 선택 → 없으면 신규 등록</b>. 소속 업체가 없으면 구분에서 <b>[개인작업자]</b>를 선택하세요.
+                    </p>
+                    {/* 구분 우선 — 선택에 따라 아래 칸이 바뀝니다 */}
+                    <div>
+                      <label className="label">구분 *</label>
+                      <select className="input-base" value={newType} onChange={(e) => { setNewType(e.target.value as CompanyType); setNewErr(''); }}>
+                        {COMPANY_TYPES.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
+                      </select>
+                    </div>
+
+                    {newRules.isIndividual ? (
+                      <div>
+                        <label className="label">이름 *</label>
+                        <input className="input-base" value={newPersonName} onChange={(e) => setNewPersonName(e.target.value)} placeholder="홍길동" />
+                        {newPersonName.trim() && <p className="mt-1 text-xs text-slate-500">등록명: <b>개인({newPersonName.trim()})</b> · 본인이 담당자입니다.</p>}
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="label">업체명 *</label>
+                        <input className="input-base" value={newName} onChange={(e) => setNewName(e.target.value)} />
+                      </div>
+                    )}
+
+                    {newRules.showManager && !newRules.isIndividual && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="label">담당자명{newRules.managerRequired ? ' *' : ''}</label>
+                          <input className="input-base" value={newManager} onChange={(e) => setNewManager(e.target.value)} />
+                        </div>
+                        <div>
+                          <label className="label">담당자 연락처{newRules.managerRequired ? ' *' : ''}</label>
+                          <input type="tel" inputMode="numeric" className="input-base" value={newPhone}
+                            onChange={(e) => setNewPhone(e.target.value.replace(/[^0-9]/g, '').slice(0, 11))} placeholder="01012345678" />
+                        </div>
+                      </div>
+                    )}
+
+                    {newRules.showBizFields && (
+                      <>
+                        <BizNoField value={newBizNo} onChange={setNewBizNo}
+                          label={newRules.isIndividual ? '사업자번호 (개인사업자만 · 선택)' : '사업자번호 (권장 — 정식등록 시 필수)'} />
+                        {!newRules.isIndividual && (
+                          <>
+                            <div>
+                              <label className="label">사업장 주소 (권장 — 정식등록 시 필수)</label>
+                              <input className="input-base" value={newAddress} onChange={(e) => setNewAddress(e.target.value)} />
+                            </div>
+                            <div>
+                              <label className="label">대표번호 (권장 — 정식등록 시 필수)</label>
+                              <input type="tel" inputMode="numeric" className="input-base" value={newTel}
+                                onChange={(e) => setNewTel(e.target.value.replace(/[^0-9]/g, '').slice(0, 12))} placeholder="0522345678" />
+                            </div>
+                          </>
+                        )}
+                      </>
+                    )}
+
                     {newErr && <div className="rounded-lg bg-red-50 p-2 text-xs text-red-700">{newErr}</div>}
                     <div className="flex gap-2">
                       <button type="button" onClick={() => setShowNew(false)} className="btn-secondary">취소</button>

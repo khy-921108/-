@@ -28,6 +28,12 @@ export default function AdminSettingsPage() {
   const [noticeBusy, setNoticeBusy] = useState(false);
   const [noticeMsg, setNoticeMsg] = useState('');
 
+  // 국세청 API 키(SUPER) — 표시는 마스킹만
+  const [biznoMasked, setBiznoMasked] = useState('');
+  const [biznoInput, setBiznoInput] = useState('');
+  const [biznoBusy, setBiznoBusy] = useState(false);
+  const [biznoMsg, setBiznoMsg] = useState('');
+
   // 백업 조회 월 (YYYY-MM) — 기본 이번 달, 과거 무제한, 미래는 이번 달까지
   const _pad = (n: number) => String(n).padStart(2, '0');
   const _ym = (d: Date) => `${d.getFullYear()}-${_pad(d.getMonth() + 1)}`;
@@ -60,6 +66,23 @@ export default function AdminSettingsPage() {
     fetch('/api/admin/home-notice', { cache: 'no-store' })
       .then((r) => r.json()).then((j) => { if (j.success) setNotice(j.data.notice ?? ''); }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    fetch('/api/admin/bizno-key', { cache: 'no-store' })
+      .then((r) => r.json()).then((j) => { if (j.success) setBiznoMasked(j.data.masked ?? ''); }).catch(() => {});
+  }, []);
+
+  const saveBiznoKey = async () => {
+    setBiznoBusy(true); setBiznoMsg('');
+    try {
+      const res = await fetch('/api/admin/bizno-key', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: biznoInput }),
+      });
+      const j = await res.json();
+      if (j.success) { setBiznoMasked(j.data.masked ?? ''); setBiznoInput(''); setBiznoMsg(j.data.set ? '키 저장됨' : '키 삭제됨'); }
+      else setBiznoMsg(j.message || '저장 실패');
+    } catch { setBiznoMsg('네트워크 오류'); } finally { setBiznoBusy(false); }
+  };
 
   const saveNotice = async (body: string) => {
     setNoticeBusy(true); setNoticeMsg('');
@@ -154,6 +177,23 @@ export default function AdminSettingsPage() {
               <button onClick={() => saveNotice(notice)} disabled={noticeBusy} className="text-xs font-bold px-3 py-1.5 rounded-lg bg-brand text-white disabled:opacity-50">{noticeBusy ? '저장 중…' : '저장'}</button>
             </div>
           </div>
+        </section>
+      )}
+
+      {/* 국세청 API 키 — 최고관리자 전용 */}
+      {role === 'SUPER' && (
+        <section className="card space-y-3 border-2 border-sky-200">
+          <h2 className="font-bold text-slate-800">🏛 국세청 API 키 <span className="text-xs font-normal text-slate-500">(최고관리자 전용)</span></h2>
+          <p className="text-xs text-slate-500">
+            공공데이터포털 <b>국세청 사업자등록정보 상태조회</b> 서비스 키. 설정하면 업체 등록·수정의 [검증] 버튼이
+            휴·폐업 여부까지 확인합니다. 미설정이면 형식 검사만 동작(흐름은 막지 않음).
+          </p>
+          <p className="text-xs text-slate-600">현재: {biznoMasked ? <b className="font-mono">{biznoMasked}</b> : <span className="italic text-slate-400">(미설정)</span>}</p>
+          <div className="flex gap-2">
+            <input className="input-base flex-1 min-w-0 text-sm" type="password" placeholder="서비스 키 입력(Decoding 키)" value={biznoInput} onChange={(e) => setBiznoInput(e.target.value)} />
+            <button onClick={saveBiznoKey} disabled={biznoBusy} className="shrink-0 text-xs font-bold px-4 rounded-xl bg-brand text-white disabled:opacity-50">{biznoBusy ? '저장 중…' : '저장'}</button>
+          </div>
+          <p className="text-[11px] text-slate-400">{biznoMsg || '※ 빈 칸으로 저장하면 키가 삭제됩니다. 키는 서버에만 보관되며 백업 zip에 포함되지 않습니다.'}</p>
         </section>
       )}
 

@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
-import { isCompanyType, isCompanyStatus, type CompanyType } from '@/lib/company';
+import { isCompanyType, isCompanyStatus, validateCompanyInput, type CompanyType } from '@/lib/company';
+import { isValidBizNo, formatBizNo } from '@/lib/bizno';
+import { checkBizStatus } from '@/lib/bizno-server';
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 
@@ -25,7 +27,7 @@ export async function GET(req: Request) {
   let q = supabase
     .from('companies')
     .select(
-      'id, name, biz_no, company_type, manager_name, phone, status, created_by, note, created_at, updated_at'
+      'id, name, biz_no, company_type, manager_name, phone, address, tel, biz_status, biz_checked_at, status, created_by, note, created_at, updated_at'
     )
     .order('created_at', { ascending: false })
     .limit(500);
@@ -33,7 +35,7 @@ export async function GET(req: Request) {
   if (keyword) {
     const safe = keyword.replace(/[%,]/g, ' ').trim();
     if (safe) {
-      q = q.or(`name.ilike.%${safe}%,manager_name.ilike.%${safe}%`);
+      q = q.or(`name.ilike.%${safe}%,manager_name.ilike.%${safe}%,biz_no.ilike.%${safe}%`);
     }
   }
   if (typeParam && isCompanyType(typeParam)) q = q.eq('company_type', typeParam);
@@ -93,17 +95,44 @@ export async function POST(req: Request) {
       typeof body.managerName === 'string' ? body.managerName.trim() : '';
     const phoneDigits =
       typeof body.phone === 'string' ? body.phone.replace(/[^0-9]/g, '') : '';
+    const addressRaw = typeof body.address === 'string' ? body.address.trim().slice(0, 300) : '';
+    const telDigits = typeof body.tel === 'string' ? body.tel.replace(/[^0-9]/g, '') : '';
     const noteRaw = typeof body.note === 'string' ? body.note.trim() : '';
+
+    // 구분별 규칙 + 정식등록(ACTIVE) 승인 필수 검사(3개 문 공통 규칙)
+    const vErrors = validateCompanyInput({
+      companyType, name, managerName: managerNameRaw, phone: phoneDigits,
+      targetStatus: status, bizNo: bizNoRaw, address: addressRaw, tel: telDigits,
+    });
+    if (vErrors.length > 0) {
+      return NextResponse.json({ success: false, code: 'INVALID_INPUT', message: vErrors[0] }, { status: 400 });
+    }
+    if (bizNoRaw && !isValidBizNo(bizNoRaw)) {
+      return NextResponse.json(
+        { success: false, code: 'INVALID_BIZNO', message: '형식상 불가능한 사업자번호입니다. 다시 확인해 주세요.' },
+        { status: 400 }
+      );
+    }
+    let bizStatus: string | null = null;
+    let bizCheckedAt: string | null = null;
+    if (bizNoRaw) {
+      const r = await checkBizStatus(bizNoRaw);
+      if (r.checked) { bizStatus = r.label; bizCheckedAt = new Date().toISOString(); }
+    }
 
     const supabase = createServiceClient();
     const { data, error } = await supabase
       .from('companies')
       .insert({
         name,
-        biz_no: bizNoRaw || null,
+        biz_no: bizNoRaw ? formatBizNo(bizNoRaw) : null,
         company_type: companyType,
         manager_name: managerNameRaw || null,
         phone: phoneDigits || null,
+        address: addressRaw || null,
+        tel: telDigits || null,
+        biz_status: bizStatus,
+        biz_checked_at: bizCheckedAt,
         status,
         created_by: 'ADMIN',
         note: noteRaw || null,

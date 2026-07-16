@@ -12,9 +12,11 @@ import {
   companyTypeLabel,
   isCompanyStatus,
   isCompanyType,
+  validateCompanyInput,
   type CompanyStatus,
   type CompanyType,
 } from './company';
+import { isValidBizNo, formatBizNo } from './bizno';
 import {
   EQUIPMENT_TYPES,
   MEMBER_TYPES,
@@ -32,13 +34,17 @@ import {
 export const COMPANY_SHEET_NAME = '업체';
 export const MEMBER_SHEET_NAME = '인원';
 
+// 새 양식(주소·대표번호·국세청확인 포함). 국세청확인은 다운로드 정보용 — 업로드 시 무시.
 export const COMPANY_HEADERS = [
   '업체명',
   '사업자번호',
   '업체구분',
   '담당자',
   '연락처',
+  '주소',
+  '대표번호',
   '상태',
+  '국세청확인',
   '비고',
 ] as const;
 
@@ -79,6 +85,8 @@ export interface CompanyRowInput {
   companyType: CompanyType;
   managerName: string | null;
   phone: string | null;
+  address: string | null;
+  tel: string | null;
   status: CompanyStatus;
   note: string | null;
 }
@@ -201,7 +209,15 @@ export async function parseCompaniesWorkbook(buffer: ArrayBuffer | Buffer): Prom
   }
 
   if (companySheet) {
-    errors.push(...validateHeader(companySheet.getRow(1), COMPANY_HEADERS, COMPANY_SHEET_NAME));
+    const headerErrors = validateHeader(companySheet.getRow(1), COMPANY_HEADERS, COMPANY_SHEET_NAME);
+    if (headerErrors.length > 0) {
+      // 옛 양식(주소·대표번호 없는 7열) 안내
+      errors.push({
+        sheet: COMPANY_SHEET_NAME, rowIndex: 1,
+        message: '옛 양식이거나 헤더가 다릅니다. "엑셀 다운로드"로 새 양식(주소·대표번호 포함)을 내려받아 사용하세요.',
+      });
+      errors.push(...headerErrors);
+    }
     const lastRow = companySheet.lastRow?.number ?? 1;
     for (let r = 2; r <= lastRow; r++) {
       const row = companySheet.getRow(r);
@@ -210,11 +226,14 @@ export async function parseCompaniesWorkbook(buffer: ArrayBuffer | Buffer): Prom
       const typeLabel = cellText(row.getCell(3));
       const managerName = cellText(row.getCell(4));
       const phone = cellText(row.getCell(5));
-      const statusLabel = cellText(row.getCell(6));
-      const note = cellText(row.getCell(7));
+      const address = cellText(row.getCell(6));
+      const tel = cellText(row.getCell(7));
+      const statusLabel = cellText(row.getCell(8));
+      // 9열(국세청확인) = 정보용 → 업로드 시 무시
+      const note = cellText(row.getCell(10));
 
       // 완전 빈 줄 skip
-      if (!name && !bizNo && !typeLabel && !managerName && !phone && !statusLabel && !note) continue;
+      if (!name && !bizNo && !typeLabel && !managerName && !phone && !address && !tel && !statusLabel && !note) continue;
 
       if (!name) {
         errors.push({ sheet: COMPANY_SHEET_NAME, rowIndex: r, field: '업체명', message: '업체명이 비어 있습니다.' });
@@ -243,13 +262,31 @@ export async function parseCompaniesWorkbook(buffer: ArrayBuffer | Buffer): Prom
         continue;
       }
 
+      // 구분별 규칙 + 정식등록 필수(3개 문 공통 규칙) — 실패 행은 반영 안 함
+      const phoneDigits = normalizePhone(phone) || '';
+      const vErrors = validateCompanyInput({
+        companyType, name, managerName, phone: phoneDigits,
+        targetStatus: status, bizNo, address, tel,
+      });
+      if (vErrors.length > 0) {
+        errors.push({ sheet: COMPANY_SHEET_NAME, rowIndex: r, message: vErrors[0] });
+        continue;
+      }
+      // 사업자번호 체크섬(형식상 불가능한 번호 거부)
+      if (bizNo && !isValidBizNo(bizNo)) {
+        errors.push({ sheet: COMPANY_SHEET_NAME, rowIndex: r, field: '사업자번호', message: `형식상 불가능한 사업자번호: "${bizNo}"` });
+        continue;
+      }
+
       companies.push({
         rowIndex: r,
         name,
-        bizNo: bizNo || null,
+        bizNo: bizNo ? formatBizNo(bizNo) : null,
         companyType,
         managerName: managerName || null,
-        phone: normalizePhone(phone) || null,
+        phone: phoneDigits || null,
+        address: address ? address.slice(0, 300) : null,
+        tel: tel ? tel.replace(/[^0-9]/g, '') : null,
         status,
         note: note || null,
       });
@@ -364,6 +401,9 @@ export interface CompanyExportRow {
   company_type: CompanyType;
   manager_name: string | null;
   phone: string | null;
+  address: string | null;
+  tel: string | null;
+  biz_status: string | null;
   status: CompanyStatus;
   note: string | null;
 }
@@ -400,7 +440,10 @@ export async function buildCompaniesWorkbook(opts: {
       companyTypeLabel(c.company_type),
       c.manager_name ?? '',
       c.phone ?? '',
+      c.address ?? '',
+      c.tel ?? '',
       companyStatusLabel(c.status),
+      c.biz_status ?? '',
       c.note ?? '',
     ]);
   }

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { isCompanyType, type CompanyType } from '@/lib/company';
+import { isCompanyType, validateCompanyInput, type CompanyType } from '@/lib/company';
+import { isValidBizNo, formatBizNo } from '@/lib/bizno';
+import { checkBizStatus } from '@/lib/bizno-server';
 import { sendSms } from '@/lib/sms';
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
@@ -83,17 +85,46 @@ export async function POST(req: Request) {
       typeof body.managerName === 'string' ? body.managerName.trim() : '';
     const phoneDigits =
       typeof body.phone === 'string' ? body.phone.replace(/[^0-9]/g, '') : '';
+    const addressRaw = typeof body.address === 'string' ? body.address.trim().slice(0, 300) : '';
+    const telDigits = typeof body.tel === 'string' ? body.tel.replace(/[^0-9]/g, '') : '';
     const noteRaw = typeof body.note === 'string' ? body.note.trim() : '';
+
+    // 구분별 규칙(공개 등록 = 항상 REVIEW라 승인 필수 검사는 없음, 담당자 필수만)
+    const vErrors = validateCompanyInput({
+      companyType, name, managerName: managerNameRaw, phone: phoneDigits,
+      targetStatus: 'REVIEW', bizNo: bizNoRaw, address: addressRaw, tel: telDigits,
+    });
+    if (vErrors.length > 0) {
+      return NextResponse.json({ success: false, code: 'INVALID_INPUT', message: vErrors[0] }, { status: 400 });
+    }
+    // 사업자번호 입력 시 체크섬 필수(형식상 불가능한 번호 저장 거부)
+    if (bizNoRaw && !isValidBizNo(bizNoRaw)) {
+      return NextResponse.json(
+        { success: false, code: 'INVALID_BIZNO', message: '형식상 불가능한 사업자번호입니다. 다시 확인해 주세요.' },
+        { status: 400 }
+      );
+    }
+    // 국세청 상태조회(키 설정 시, best-effort — 실패해도 등록 진행)
+    let bizStatus: string | null = null;
+    let bizCheckedAt: string | null = null;
+    if (bizNoRaw) {
+      const r = await checkBizStatus(bizNoRaw);
+      if (r.checked) { bizStatus = r.label; bizCheckedAt = new Date().toISOString(); }
+    }
 
     const supabase = createServiceClient();
     const { data, error } = await supabase
       .from('companies')
       .insert({
         name,
-        biz_no: bizNoRaw || null,
+        biz_no: bizNoRaw ? formatBizNo(bizNoRaw) : null,
         company_type: companyType,
         manager_name: managerNameRaw || null,
         phone: phoneDigits || null,
+        address: addressRaw || null,
+        tel: telDigits || null,
+        biz_status: bizStatus,
+        biz_checked_at: bizCheckedAt,
         status: 'REVIEW',
         created_by: 'APPLICANT',
         note: noteRaw || null,

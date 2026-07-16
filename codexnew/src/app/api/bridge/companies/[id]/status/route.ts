@@ -9,6 +9,7 @@
 
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { approvalMissingFields } from '@/lib/company';
 import { sendSms } from '@/lib/sms';
 
 export const dynamic = 'force-dynamic';
@@ -31,7 +32,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   const supabase = createServiceClient();
   const { data: company } = await supabase
     .from('companies')
-    .select('id, status, name, phone')
+    .select('id, status, name, phone, company_type, biz_no, address, tel')
     .eq('id', ctx.params.id)
     .maybeSingle();
 
@@ -41,6 +42,17 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
       { error: 'ALREADY_PROCESSED', currentStatus: company.status },
       { status: 409 }
     );
+  }
+
+  // 승인(정식등록) 필수 검사 — 일반·장비는 사업자번호·주소·대표번호 없으면 거부(3개 문 공통 규칙)
+  if (action === 'APPROVE') {
+    const missing = approvalMissingFields(company);
+    if (missing.length > 0) {
+      return NextResponse.json(
+        { error: 'APPROVAL_BLOCKED', message: `정식등록에는 ${missing.join('·')}이(가) 필요합니다. 업체에 확인 후 입력하세요.` },
+        { status: 400 }
+      );
+    }
   }
 
   const newStatus = action === 'APPROVE' ? 'ACTIVE' : 'DISABLED';

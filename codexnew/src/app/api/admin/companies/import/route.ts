@@ -106,6 +106,8 @@ export async function POST(req: Request) {
     company_type: c.companyType,
     manager_name: c.managerName,
     phone: c.phone,
+    address: c.address,
+    tel: c.tel,
     status: c.status,
     note: c.note,
   }));
@@ -133,10 +135,10 @@ export async function POST(req: Request) {
 
   const hasRowErrors = errors.some((e) => e.rowIndex > 1);
 
-  // dryRun 이거나 행 오류가 하나라도 있으면 미리보기만 반환
-  if (dryRun || hasRowErrors) {
+  // dryRun → 미리보기만. 행 오류가 있어도 실패 행만 제외하고 나머지는 반영 가능(결과에 "몇 행: 사유" 보고).
+  if (dryRun) {
     return NextResponse.json({
-      success: !hasRowErrors,
+      success: true,
       code: hasRowErrors ? 'HAS_ROW_ERRORS' : 'PREVIEW_OK',
       data: {
         dryRun: true,
@@ -145,8 +147,10 @@ export async function POST(req: Request) {
         errors,
         warnings,
       },
-      message: hasRowErrors ? '오류가 있는 행이 있어 반영할 수 없습니다.' : '검증 통과 — 미리보기',
-    }, { status: hasRowErrors ? 400 : 200 });
+      message: hasRowErrors
+        ? `오류 행 ${errors.filter((e) => e.rowIndex > 1).length}건은 반영되지 않습니다. 나머지만 반영하려면 [반영]을 누르세요.`
+        : '검증 통과 — 미리보기',
+    });
   }
 
   // ===== 실제 반영 =====
@@ -192,6 +196,8 @@ export async function POST(req: Request) {
           company_type: c.companyType,
           manager_name: c.managerName,
           phone: c.phone,
+          address: c.address,
+          tel: c.tel,
           status: c.status,
           note: c.note,
         })
@@ -213,6 +219,8 @@ export async function POST(req: Request) {
           company_type: c.companyType,
           manager_name: c.managerName,
           phone: c.phone,
+          address: c.address,
+          tel: c.tel,
           status: c.status,
           created_by: 'ADMIN',
           note: c.note,
@@ -339,8 +347,12 @@ export async function POST(req: Request) {
       dryRun: false,
       companies: companyResults,
       members: memberResults,
-      errors: [],
+      // 실패(검증 불통과) 행은 반영 안 됨 — "몇 행: 사유" 목록으로 보고
+      errors,
       warnings,
     },
+    message: hasRowErrors
+      ? `반영 완료. 단, 오류 행 ${errors.filter((e) => e.rowIndex > 1).length}건은 반영되지 않았습니다(아래 목록).`
+      : '반영 완료.',
   });
 }

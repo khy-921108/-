@@ -6,9 +6,13 @@ import {
   COMPANY_TYPES,
   companyStatusLabel,
   companyTypeLabel,
+  companyFieldRules,
+  approvalMissingFields,
   type CompanyStatus,
   type CompanyType,
 } from '@/lib/company';
+import { isValidBizNo, bizNoDigits } from '@/lib/bizno';
+import BizNoField from '@/components/BizNoField';
 import {
   EQUIPMENT_TYPES,
   MEMBER_TYPES,
@@ -31,6 +35,10 @@ interface CompanyItem {
   company_type: CompanyType;
   manager_name: string | null;
   phone: string | null;
+  address: string | null;
+  tel: string | null;
+  biz_status: string | null;
+  biz_checked_at: string | null;
   status: CompanyStatus;
   created_by: 'APPLICANT' | 'ADMIN';
   note: string | null;
@@ -193,7 +201,7 @@ export default function AdminCompaniesPage() {
       <div className="card space-y-3">
         <input
           className="input-base"
-          placeholder="업체명 또는 담당자 검색"
+          placeholder="업체명·담당자·사업자번호 검색"
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
         />
@@ -230,27 +238,60 @@ export default function AdminCompaniesPage() {
 
       <div className="space-y-2">
         <p className="text-xs text-slate-500">총 {items.length}건 · 카드 클릭 시 수정, "인원" 클릭 시 소속 인원 보기</p>
-        {items.map((it) => (
+        {items.map((it) => {
+          const rules = companyFieldRules(it.company_type);
+          const missing = it.status !== 'DISABLED' ? approvalMissingFields(it) : [];
+          const bizBroken = !!it.biz_no && !isValidBizNo(it.biz_no);
+          return (
           <div key={it.id} className="card hover:shadow-md transition space-y-2">
             <div
-              className="cursor-pointer space-y-2"
+              className="cursor-pointer space-y-1"
               onClick={() => setEditing(it)}
             >
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="font-bold text-slate-800">{it.name}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    {companyTypeLabel(it.company_type)}
-                    {it.biz_no ? ` · 사업자 ${it.biz_no}` : ''}
-                  </p>
-                  {(it.manager_name || it.phone) && (
-                    <p className="text-xs text-slate-600 mt-0.5">
-                      {it.manager_name || '담당자 미입력'} · {it.phone || '연락처 없음'}
-                    </p>
-                  )}
-                </div>
+              {/* 1줄: 업체명 + 상태 */}
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-bold text-slate-800">{it.name}</p>
                 {statusBadge(it.status)}
               </div>
+
+              {rules.isIndividual ? (
+                /* 개인: 구분·연락처만 간결 */
+                <p className="text-xs text-slate-500">{companyTypeLabel(it.company_type)}{it.phone ? ` · ${it.phone}` : ''}</p>
+              ) : rules.approvalNeedsBiz ? (
+                /* 일반·장비: 구분·사업자번호+국세청 / 주소 / 담당자 */
+                <>
+                  <p className="text-xs text-slate-500">
+                    {companyTypeLabel(it.company_type)}
+                    {it.biz_no ? ` · ${it.biz_no}` : ' · 사업자번호 미입력'}
+                    {it.biz_status && (
+                      <span className={`ml-1 inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${it.biz_status === '계속사업자' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
+                        {it.biz_status}
+                      </span>
+                    )}
+                  </p>
+                  {it.address && <p className="text-xs text-slate-500 truncate">{it.address}</p>}
+                  <p className="text-xs text-slate-600">
+                    {it.manager_name || '담당자 미입력'} · {it.phone || '연락처 없음'}{it.tel ? ` · 대표 ${it.tel}` : ''}
+                  </p>
+                </>
+              ) : (
+                /* 운송·기타: 업체명·구분(+있으면 담당자) */
+                <p className="text-xs text-slate-500">
+                  {companyTypeLabel(it.company_type)}
+                  {it.manager_name ? ` · ${it.manager_name}${it.phone ? ` (${it.phone})` : ''}` : ''}
+                </p>
+              )}
+
+              {/* ⚠ 경고 */}
+              {missing.length > 0 && (
+                <p className="text-xs font-bold text-amber-700" title={`빠진 항목: ${missing.join(', ')}`}>
+                  ⚠ 정보 미비 — 승인 불가 <span className="font-normal text-amber-600">({missing.join('·')})</span>
+                </p>
+              )}
+              {bizBroken && (
+                <p className="text-xs font-bold text-red-600">🔴 사업자번호 형식 오류 — 수정에서 고쳐주세요</p>
+              )}
+
               {it.note && (
                 <p className="text-xs text-slate-500 truncate">메모: {it.note}</p>
               )}
@@ -270,7 +311,8 @@ export default function AdminCompaniesPage() {
               </button>
             </div>
           </div>
-        ))}
+          );
+        })}
         {items.length === 0 && !loading && (
           <div className="card text-center text-slate-500 py-8">조회 결과가 없습니다.</div>
         )}
@@ -345,27 +387,47 @@ function CompanyEditModal({
   const [companyType, setCompanyType] = useState<CompanyType>(item?.company_type ?? 'GENERAL');
   const [managerName, setManagerName] = useState(item?.manager_name ?? '');
   const [phone, setPhone] = useState(item?.phone ?? '');
+  const [address, setAddress] = useState(item?.address ?? '');
+  const [tel, setTel] = useState(item?.tel ?? '');
   const [status, setStatus] = useState<CompanyStatus>(item?.status ?? 'ACTIVE');
   const [note, setNote] = useState(item?.note ?? '');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
 
   const formatPhone = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 11);
+  const rules = companyFieldRules(companyType);
 
   const onSave = async () => {
     setErr('');
     if (!name.trim()) {
-      setErr('업체명을 입력해 주세요.');
+      setErr(rules.isIndividual ? '등록명(개인(이름))을 입력해 주세요.' : '업체명을 입력해 주세요.');
       return;
+    }
+    if (rules.managerRequired && (!managerName.trim() || !bizNoDigits(phone))) {
+      setErr('일반·장비업체는 담당자명·연락처가 필수입니다.');
+      return;
+    }
+    if (bizNo && bizNoDigits(bizNo).length === 10 && !isValidBizNo(bizNo)) {
+      setErr('형식상 불가능한 사업자번호입니다.');
+      return;
+    }
+    if (status === 'ACTIVE') {
+      const missing = approvalMissingFields({ company_type: companyType, biz_no: bizNo, address, tel });
+      if (missing.length > 0) {
+        setErr(`정식등록에는 ${missing.join('·')}이(가) 필요합니다. 업체에 확인 후 입력하세요.`);
+        return;
+      }
     }
     setSaving(true);
     try {
       const payload = {
         name: name.trim(),
-        bizNo,
+        bizNo: rules.showBizFields ? bizNo : '',
         companyType,
-        managerName,
-        phone,
+        managerName: rules.showManager ? managerName : '',
+        phone: rules.showManager || rules.isIndividual ? phone : '',
+        address: rules.showBizFields && !rules.isIndividual ? address : '',
+        tel: rules.showBizFields && !rules.isIndividual ? tel : '',
         status,
         note,
       };
@@ -413,25 +475,13 @@ function CompanyEditModal({
         </div>
 
         <div className="p-4 space-y-3">
+          {/* 구분 우선 — 선택에 따라 아래 칸이 바뀝니다 */}
           <div>
-            <label className="label">업체명 *</label>
-            <input className="input-base" value={name} onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">사업자번호</label>
-            <input
-              className="input-base"
-              value={bizNo}
-              onChange={(e) => setBizNo(e.target.value)}
-              placeholder="000-00-00000"
-            />
-          </div>
-          <div>
-            <label className="label">업체 구분</label>
+            <label className="label">업체 구분 *</label>
             <select
               className="input-base"
               value={companyType}
-              onChange={(e) => setCompanyType(e.target.value as CompanyType)}
+              onChange={(e) => { setCompanyType(e.target.value as CompanyType); setErr(''); }}
             >
               {COMPANY_TYPES.map((t) => (
                 <option key={t.code} value={t.code}>
@@ -441,24 +491,57 @@ function CompanyEditModal({
             </select>
           </div>
           <div>
-            <label className="label">담당자명</label>
-            <input
-              className="input-base"
-              value={managerName}
-              onChange={(e) => setManagerName(e.target.value)}
-            />
+            <label className="label">{rules.isIndividual ? '등록명 * (개인(이름) 형식)' : '업체명 *'}</label>
+            <input className="input-base" value={name} onChange={(e) => setName(e.target.value)}
+              placeholder={rules.isIndividual ? '개인(홍길동)' : ''} />
           </div>
-          <div>
-            <label className="label">담당자 연락처</label>
-            <input
-              type="tel"
-              inputMode="numeric"
-              className="input-base"
-              value={phone}
-              onChange={(e) => setPhone(formatPhone(e.target.value))}
-              placeholder="01012345678"
-            />
-          </div>
+          {rules.showBizFields && (
+            <BizNoField value={bizNo} onChange={setBizNo}
+              label={rules.isIndividual ? '사업자번호 (개인사업자만 · 선택)' : '사업자번호 (정식등록 시 필수)'} />
+          )}
+          {rules.showBizFields && !rules.isIndividual && (
+            <>
+              <div>
+                <label className="label">사업장 주소 (정식등록 시 필수)</label>
+                <input className="input-base" value={address} onChange={(e) => setAddress(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">대표번호 (정식등록 시 필수)</label>
+                <input type="tel" inputMode="numeric" className="input-base" value={tel}
+                  onChange={(e) => setTel(e.target.value.replace(/[^0-9]/g, '').slice(0, 12))} placeholder="0522345678" />
+              </div>
+            </>
+          )}
+          {rules.showManager && (
+            <>
+              <div>
+                <label className="label">담당자명{rules.managerRequired ? ' *' : ''}</label>
+                <input
+                  className="input-base"
+                  value={managerName}
+                  onChange={(e) => setManagerName(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="label">담당자 연락처{rules.managerRequired ? ' *' : ''}</label>
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  className="input-base"
+                  value={phone}
+                  onChange={(e) => setPhone(formatPhone(e.target.value))}
+                  placeholder="01012345678"
+                />
+              </div>
+            </>
+          )}
+          {rules.isIndividual && (
+            <div>
+              <label className="label">연락처 (본인)</label>
+              <input type="tel" inputMode="numeric" className="input-base" value={phone}
+                onChange={(e) => setPhone(formatPhone(e.target.value))} placeholder="01012345678" />
+            </div>
+          )}
           <div>
             <label className="label">상태</label>
             <select
@@ -1322,6 +1405,7 @@ function ImportModal({
   };
 
   const hasErrors = !!preview?.data?.errors?.length;
+  const fatalErrors = !!preview?.data?.errors?.some((e) => e.rowIndex <= 1); // 시트/헤더(양식) 오류 → 반영 불가
   const previewReady = !!preview && !committed;
 
   return (
@@ -1376,12 +1460,15 @@ function ImportModal({
             </button>
             <button
               onClick={doCommit}
-              disabled={loading || !previewReady || hasErrors}
+              disabled={loading || !previewReady || fatalErrors}
               className="btn-primary flex-1"
             >
-              {committed ? '✅ 반영 완료' : '⬆ DB 반영'}
+              {committed ? '✅ 반영 완료' : hasErrors ? '⬆ 오류 행 제외하고 반영' : '⬆ DB 반영'}
             </button>
           </div>
+          {hasErrors && !fatalErrors && !committed && (
+            <p className="text-[11px] text-amber-700">⚠ 오류 행은 반영되지 않습니다. 아래 "몇 행: 사유" 목록을 확인해 수정 후 다시 올리거나, 나머지만 반영하세요.</p>
+          )}
 
           {err && <div className="rounded-lg bg-red-50 p-2 text-xs text-red-700">{err}</div>}
 

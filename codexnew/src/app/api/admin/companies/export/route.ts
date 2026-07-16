@@ -21,7 +21,7 @@ export async function GET() {
 
   const { data: companies, error: companiesErr } = await supabase
     .from('companies')
-    .select('id, name, biz_no, company_type, manager_name, phone, status, note')
+    .select('id, name, biz_no, company_type, manager_name, phone, address, tel, biz_status, status, note')
     .order('name', { ascending: true })
     .limit(5000);
   if (companiesErr) {
@@ -58,6 +58,9 @@ export async function GET() {
       company_type: c.company_type,
       manager_name: c.manager_name,
       phone: c.phone,
+      address: c.address,
+      tel: c.tel,
+      biz_status: c.biz_status,
       status: c.status,
       note: c.note,
     })),
