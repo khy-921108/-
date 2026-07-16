@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { formatDate } from '@/lib/format';
 import { SUPPLEMENTAL_WORKS } from '@/lib/work-permit-constants';
 import { STAGE_BADGE_CLASS, stageBucket, type Stage } from '@/lib/work-permit-stage';
+import StatCardButton from '@/components/StatCardButton';
 
 interface SigStatus {
   total: number;
@@ -62,19 +63,23 @@ export default function AdminWorkPermitsPage() {
   const shiftMonth = (ym: string, delta: number) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + delta, 1); return ymOf(d); };
   const PAGE_SIZE = 10;
 
+  const thisYear = String(new Date().getFullYear());
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
+  const [periodMode, setPeriodMode] = useState<'month' | 'year'>('month');
   const [month, setMonth] = useState(thisMonth);
+  const [yearSel, setYearSel] = useState(thisYear);
   const [tab, setTab] = useState<'all' | 'todo' | 'active' | 'done'>('all');
   const [page, setPage] = useState(1);
 
-  const load = async (m = month, kw = keyword) => {
+  const load = async (kw = keyword, mode = periodMode, m = month, y = yearSel) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (kw) params.set('keyword', kw);
-      if (m) params.set('month', m);
+      if (mode === 'month') params.set('month', m);
+      else params.set('year', y);
       const res = await fetch(`/api/admin/work-permits?${params.toString()}`);
       const json = await res.json();
       if (json.success) setItems(json.data.items);
@@ -84,12 +89,12 @@ export default function AdminWorkPermitsPage() {
     }
   };
 
-  // 진입/월 변경 시 자동 조회 (조회 버튼 없이)
+  // 진입/기간 변경 시 자동 조회 (조회 버튼 없이)
   useEffect(() => {
     setPage(1);
-    load(month, keyword);
+    load(keyword, periodMode, month, yearSel);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [month]);
+  }, [month, yearSel, periodMode]);
 
   const suppLabels = (s: Record<string, 'Y' | 'N'>) =>
     SUPPLEMENTAL_WORKS.filter((w) => s?.[w.key] === 'Y').map((w) => w.label);
@@ -112,65 +117,80 @@ export default function AdminWorkPermitsPage() {
     <main className="space-y-4">
       <h1 className="text-xl font-bold text-slate-800">작업허가 신청 목록</h1>
 
+      {/* ① 숫자 카드 (클릭 = 필터) — 3화면 공통 구조 */}
+      <div className="grid grid-cols-4 gap-2">
+        <StatCardButton label="전체" value={items.length} active={tab === 'all'} onClick={() => { setTab('all'); setPage(1); }} />
+        <StatCardButton label="🖊 처리 필요" value={counts.todo} color="text-amber-700" active={tab === 'todo'} onClick={() => { setTab('todo'); setPage(1); }} />
+        <StatCardButton label="🔵 작업 중" value={counts.active} color="text-emerald-700" active={tab === 'active'} onClick={() => { setTab('active'); setPage(1); }} />
+        <StatCardButton label="끝난 것" value={counts.done} color="text-slate-500" active={tab === 'done'} onClick={() => { setTab('done'); setPage(1); }} />
+      </div>
+
       <div className="card space-y-3">
-        {/* 조회 월 선택기 */}
-        <div className="flex items-center justify-center gap-3">
+        {/* ② 필터 줄 — [월별|년별] + 기간 선택기 */}
+        <div className="flex items-center justify-center gap-3 flex-wrap">
+          <div className="flex rounded-lg border border-slate-300 overflow-hidden text-sm font-bold">
+            <button onClick={() => { setPeriodMode('month'); setPage(1); }}
+              className={`px-3 py-1.5 ${periodMode === 'month' ? 'bg-brand text-white' : 'bg-white text-slate-600'}`}>월별</button>
+            <button onClick={() => { setPeriodMode('year'); setPage(1); }}
+              className={`px-3 py-1.5 ${periodMode === 'year' ? 'bg-brand text-white' : 'bg-white text-slate-600'}`}>년별</button>
+          </div>
+          {periodMode === 'month' ? (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setMonth((m) => shiftMonth(m, -1))}
+                className="h-9 w-9 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 text-lg leading-none"
+                aria-label="이전 달"
+              >◀</button>
+              <span className="text-base font-bold text-slate-800 w-28 text-center">{my}년 {Number(mm)}월</span>
+              <button
+                onClick={() => setMonth((m) => (m < maxMonth ? shiftMonth(m, 1) : m))}
+                disabled={month >= maxMonth}
+                className="h-9 w-9 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-30 text-lg leading-none"
+                aria-label="다음 달"
+              >▶</button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setYearSel((y) => String(Number(y) - 1))}
+                className="h-9 w-9 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 text-lg leading-none"
+                aria-label="이전 해"
+              >◀</button>
+              <span className="text-base font-bold text-slate-800 w-28 text-center">{yearSel}년</span>
+              <button
+                onClick={() => setYearSel((y) => String(Number(y) + 1))}
+                disabled={Number(yearSel) >= Number(thisYear)}
+                className="h-9 w-9 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-30 text-lg leading-none"
+                aria-label="다음 해"
+              >▶</button>
+            </div>
+          )}
           <button
-            onClick={() => setMonth((m) => shiftMonth(m, -1))}
-            className="h-9 w-9 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 text-lg leading-none"
-            aria-label="이전 달"
-          >◀</button>
-          <span className="text-base font-bold text-slate-800 w-32 text-center">{my}년 {Number(mm)}월</span>
-          <button
-            onClick={() => setMonth((m) => (m < maxMonth ? shiftMonth(m, 1) : m))}
-            disabled={month >= maxMonth}
-            className="h-9 w-9 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-30 text-lg leading-none"
-            aria-label="다음 달"
-          >▶</button>
+            onClick={() => { setKeyword(''); setTab('all'); setPeriodMode('month'); setMonth(thisMonth); setYearSel(thisYear); setPage(1); if (month === thisMonth && periodMode === 'month') load('', 'month', thisMonth, thisYear); }}
+            className="text-xs text-slate-500 underline"
+          >이번 달로 초기화</button>
         </div>
 
-        {/* 통합 검색 (선택 월 안에서) */}
+        {/* ③ 통합 검색 */}
         <div className="flex gap-2 items-stretch">
           <input
             className="input-base flex-1 min-w-0"
             placeholder="신청번호·업체·작업명·신청인 검색"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); load(month, keyword); } }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); load(keyword); } }}
           />
           <button
-            onClick={() => { setPage(1); load(month, keyword); }}
+            onClick={() => { setPage(1); load(keyword); }}
             className="shrink-0 rounded-xl bg-brand text-white text-sm font-semibold px-5 whitespace-nowrap disabled:opacity-50"
             disabled={loading}
           >{loading ? '조회 중…' : '검색'}</button>
-        </div>
-
-        {/* 3분류 탭 (건수 포함) */}
-        <div className="flex items-center gap-1 flex-wrap">
-          {([
-            { key: 'todo', label: '🖊 처리 필요', n: counts.todo },
-            { key: 'active', label: '🔵 작업 중', n: counts.active },
-            { key: 'done', label: '끝난 것', n: counts.done },
-            { key: 'all', label: '전체', n: items.length },
-          ] as const).map((t) => (
-            <button
-              key={t.key}
-              onClick={() => { setTab(t.key); setPage(1); }}
-              className={`text-xs font-bold px-3 py-1.5 rounded-full border ${tab === t.key ? 'bg-brand text-white border-brand' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
-            >
-              {t.label} {t.n}
-            </button>
-          ))}
-          <button
-            onClick={() => { setKeyword(''); setTab('all'); setMonth(thisMonth); setPage(1); if (month === thisMonth) load(thisMonth, ''); }}
-            className="ml-auto text-xs text-slate-500 underline"
-          >이번 달로 초기화</button>
         </div>
       </div>
 
       <div className="space-y-2">
         <p className="text-sm font-semibold text-slate-700">
-          {my}년 {Number(mm)}월 · {tab === 'all' ? '전체' : tab === 'todo' ? '처리 필요' : tab === 'active' ? '작업 중' : '끝난 것'} {filtered.length}건
+          {periodMode === 'month' ? `${my}년 ${Number(mm)}월` : `${yearSel}년`} · {tab === 'all' ? '전체' : tab === 'todo' ? '처리 필요' : tab === 'active' ? '작업 중' : '끝난 것'} {filtered.length}건
         </p>
         {visibleItems.map((it) => {
           const supp = suppLabels(it.supplemental);
@@ -255,7 +275,7 @@ export default function AdminWorkPermitsPage() {
         })}
         {filtered.length === 0 && !loading && (
           <div className="card text-center text-slate-500 py-8">
-            {tab !== 'all' && items.length > 0 ? '이 분류에 해당하는 작업허가가 없습니다.' : `${my}년 ${Number(mm)}월에 해당하는 작업허가가 없습니다.`}
+            {tab !== 'all' && items.length > 0 ? '이 분류에 해당하는 작업허가가 없습니다.' : `${periodMode === 'month' ? `${my}년 ${Number(mm)}월` : `${yearSel}년`}에 해당하는 작업허가가 없습니다.`}
           </div>
         )}
 

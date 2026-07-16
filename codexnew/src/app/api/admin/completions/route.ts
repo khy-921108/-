@@ -18,28 +18,13 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const status = url.searchParams.get('status');
   const keyword = url.searchParams.get('keyword');
-  const dateFrom = url.searchParams.get('dateFrom');
-  const dateTo = url.searchParams.get('dateTo');
+  const year = (url.searchParams.get('year') ?? '').trim(); // 응시일(created_at) 기준 연도(KST)
   const targetType = url.searchParams.get('targetType');
 
   const supabase = createServiceClient();
 
-  // 1. training_sessions 조회 (target_types JOIN 은 읽기 전용 참조라 안전)
-  let sq = supabase
-    .from('training_sessions')
-    .select(`
-      id, name, affiliation, phone, birth_date, vehicle_number, status, created_at,
-      target_types(code, label)
-    `)
-    .order('created_at', { ascending: false });
-
-  if (keyword) sq = sq.or(`name.ilike.%${keyword}%,affiliation.ilike.%${keyword}%`);
-  if (dateFrom) sq = sq.gte('created_at', new Date(dateFrom).toISOString());
-  if (dateTo) {
-    const end = new Date(dateTo);
-    end.setDate(end.getDate() + 1);
-    sq = sq.lt('created_at', end.toISOString());
-  }
+  // 대상 필터용 target_type_id 선조회
+  let targetTypeId: string | null = null;
   if (targetType) {
     const { data: tt, error: ttErr } = await supabase
       .from('target_types')
@@ -53,16 +38,38 @@ export async function GET(req: Request) {
         { status: 500 }
       );
     }
-    if (tt) sq = sq.eq('target_type_id', tt.id);
+    targetTypeId = tt?.id ?? null;
   }
 
-  const { data: sessions, error: sessionsErr } = await sq.limit(500);
-  if (sessionsErr) {
-    console.error('[admin/completions] sessions error:', sessionsErr);
-    return NextResponse.json(
-      { success: false, code: 'SESSIONS_QUERY_FAILED', message: sessionsErr.message },
-      { status: 500 }
-    );
+  // 1. training_sessions 전량 조회(연도 범위) — 500건 상한 제거(페이지네이션 루프)
+  const sessions: any[] = [];
+  const size = 1000;
+  let from = 0;
+  for (;;) {
+    let sq = supabase
+      .from('training_sessions')
+      .select(`
+        id, name, affiliation, phone, birth_date, vehicle_number, status, created_at,
+        target_types(code, label)
+      `)
+      .order('created_at', { ascending: false });
+    if (keyword) sq = sq.or(`name.ilike.%${keyword}%,affiliation.ilike.%${keyword}%,vehicle_number.ilike.%${keyword}%`);
+    if (/^\d{4}$/.test(year)) {
+      sq = sq.gte('created_at', `${year}-01-01T00:00:00+09:00`).lt('created_at', `${Number(year) + 1}-01-01T00:00:00+09:00`);
+    }
+    if (targetTypeId) sq = sq.eq('target_type_id', targetTypeId);
+    const { data, error: sessionsErr } = await sq.range(from, from + size - 1);
+    if (sessionsErr) {
+      console.error('[admin/completions] sessions error:', sessionsErr);
+      return NextResponse.json(
+        { success: false, code: 'SESSIONS_QUERY_FAILED', message: sessionsErr.message },
+        { status: 500 }
+      );
+    }
+    if (!data || data.length === 0) break;
+    sessions.push(...data);
+    if (data.length < size) break;
+    from += size;
   }
 
   // 2. 해당 세션들의 completions 별도 조회 (중첩 JOIN 대신)

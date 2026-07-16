@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { formatDate } from '@/lib/format';
+import StatCardButton from '@/components/StatCardButton';
 
 interface Item {
   sessionId: string;
@@ -19,14 +20,6 @@ interface Item {
   validUntil: string | null;
   score: number | null;
 }
-
-const STATUSES = [
-  { code: '', label: '전체' },
-  { code: 'VALID', label: '유효 수료' },
-  { code: 'EXPIRED', label: '만료' },
-  { code: 'IN_PROGRESS', label: '진행중' },
-  { code: 'FAILED', label: '불합격' },
-];
 
 const TARGETS = [
   { code: '', label: '전체' },
@@ -57,24 +50,58 @@ function statusBadge(status: string) {
   );
 }
 
+// 남은일수: validUntil 기준(만료=음수). 수료 없으면 null.
+function daysLeftOf(validUntil: string | null): number | null {
+  if (!validUntil) return null;
+  return Math.ceil((new Date(validUntil).getTime() - Date.now()) / (24 * 3600 * 1000));
+}
+
+// 3분류 버킷: ok(유효 31일↑) / expiring(30일 이내) / expired(만료) / etc(진행중·불합격 등)
+function bucketOf(it: Item): 'ok' | 'expiring' | 'expired' | 'etc' {
+  if (it.status === 'EXPIRED') return 'expired';
+  if (it.status === 'VALID') {
+    const d = daysLeftOf(it.validUntil);
+    return d !== null && d <= 30 ? 'expiring' : 'ok';
+  }
+  return 'etc';
+}
+
+/** 전화 반가림: 010-****-5678 */
+function maskPhone(phone: string): string {
+  const d = (phone ?? '').replace(/\D/g, '');
+  if (d.length < 8) return phone || '-';
+  return `${d.slice(0, 3)}-****-${d.slice(-4)}`;
+}
+
+/** 남은일수 색칩: 🟢31일↑ / 🟡30일 이내 / 🔴만료 */
+function DaysChip({ validUntil }: { validUntil: string | null }) {
+  const d = daysLeftOf(validUntil);
+  if (d === null) return <span className="text-[11px] text-slate-300">-</span>;
+  if (d < 0) return <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700">🔴 만료 {Math.abs(d)}일</span>;
+  if (d <= 30) return <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-700">🟡 D-{d}</span>;
+  return <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-700">🟢 D-{d}</span>;
+}
+
+const PAGE_SIZE = 10;
+
 export default function AdminCompletionsPage() {
+  const thisYear = String(new Date().getFullYear());
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState('');
+  const [bucket, setBucket] = useState<'' | 'ok' | 'expiring' | 'expired'>('');
   const [targetType, setTargetType] = useState('');
   const [keyword, setKeyword] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [yearSel, setYearSel] = useState(thisYear);
+  const [page, setPage] = useState(1);
+  const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Item | null>(null);
 
-  const load = async () => {
+  const load = async (kw = keyword, y = yearSel, tt = targetType) => {
     setLoading(true);
     const params = new URLSearchParams();
-    if (status) params.set('status', status);
-    if (targetType) params.set('targetType', targetType);
-    if (keyword) params.set('keyword', keyword);
-    if (dateFrom) params.set('dateFrom', dateFrom);
-    if (dateTo) params.set('dateTo', dateTo);
+    if (tt) params.set('targetType', tt);
+    if (kw) params.set('keyword', kw);
+    params.set('year', y);
 
     const res = await fetch(`/api/admin/completions?${params.toString()}`);
     const json = await res.json();
@@ -83,9 +110,31 @@ export default function AdminCompletionsPage() {
   };
 
   useEffect(() => {
-    load();
+    setPage(1);
+    load(keyword, yearSel, targetType);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [yearSel, targetType]);
+
+  // 숫자 카드 건수 = 조회 범위(연도) 전체 기준
+  const counts = { ok: 0, expiring: 0, expired: 0 };
+  items.forEach((it) => { const b = bucketOf(it); if (b !== 'etc') counts[b] += 1; });
+
+  // 카드 필터 + 만료 임박순 정렬(챙길 사람 맨 위: 유효기간 오름차순, 수료 없음은 뒤)
+  const filtered = (bucket ? items.filter((it) => bucketOf(it) === bucket) : items)
+    .slice()
+    .sort((a, b) => {
+      if (!a.validUntil && !b.validUntil) return 0;
+      if (!a.validUntil) return 1;
+      if (!b.validUntil) return -1;
+      return new Date(a.validUntil).getTime() - new Date(b.validUntil).getTime();
+    });
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const curPage = Math.min(page, totalPages);
+  const visible = filtered.slice((curPage - 1) * PAGE_SIZE, curPage * PAGE_SIZE);
+
+  const togglePhone = (id: string) => {
+    setRevealed((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  };
 
   // ESC 키로 모달 닫기
   useEffect(() => {
@@ -127,23 +176,35 @@ export default function AdminCompletionsPage() {
     <main className="space-y-4">
       <h1 className="text-xl font-bold text-slate-800 no-print">수료 현황</h1>
 
+      {/* ① 숫자 카드 (클릭 = 필터) — 3화면 공통 구조 */}
+      <div className="grid grid-cols-4 gap-2 no-print">
+        <StatCardButton label="전체" value={items.length} active={bucket === ''} onClick={() => { setBucket(''); setPage(1); }} />
+        <StatCardButton label="✅ 유효" value={counts.ok} color="text-emerald-700" active={bucket === 'ok'} onClick={() => { setBucket('ok'); setPage(1); }} />
+        <StatCardButton label="⚠ 만료임박" value={counts.expiring} color="text-amber-700" active={bucket === 'expiring'} onClick={() => { setBucket('expiring'); setPage(1); }} />
+        <StatCardButton label="🔴 만료" value={counts.expired} color="text-red-600" active={bucket === 'expired'} onClick={() => { setBucket('expired'); setPage(1); }} />
+      </div>
+
       <div className="card space-y-3 no-print">
-        <div className="grid grid-cols-2 gap-2">
+        {/* ② 필터 줄 — 연도(응시일 기준) + 대상 */}
+        <div className="flex items-center justify-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setYearSel((y) => String(Number(y) - 1))}
+              className="h-9 w-9 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 text-lg leading-none"
+              aria-label="이전 해"
+            >◀</button>
+            <span className="text-base font-bold text-slate-800 w-28 text-center">{yearSel}년</span>
+            <button
+              onClick={() => setYearSel((y) => String(Number(y) + 1))}
+              disabled={Number(yearSel) >= Number(thisYear)}
+              className="h-9 w-9 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-30 text-lg leading-none"
+              aria-label="다음 해"
+            >▶</button>
+          </div>
           <select
-            className="input-base"
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
-            {STATUSES.map((s) => (
-              <option key={s.code} value={s.code}>
-                상태: {s.label}
-              </option>
-            ))}
-          </select>
-          <select
-            className="input-base"
+            className="input-base !w-auto"
             value={targetType}
-            onChange={(e) => setTargetType(e.target.value)}
+            onChange={(e) => { setTargetType(e.target.value); setPage(1); }}
           >
             {TARGETS.map((t) => (
               <option key={t.code} value={t.code}>
@@ -152,68 +213,109 @@ export default function AdminCompletionsPage() {
             ))}
           </select>
         </div>
-        <input
-          className="input-base"
-          placeholder="이름 또는 소속 검색"
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-        />
-        <div className="grid grid-cols-2 gap-2">
+        {/* ③ 통합 검색 */}
+        <div className="flex gap-2 items-stretch">
           <input
-            type="date"
-            className="input-base"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
+            className="input-base flex-1 min-w-0"
+            placeholder="이름·소속·차량번호 검색"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); load(keyword); } }}
           />
-          <input
-            type="date"
-            className="input-base"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-          />
+          <button
+            onClick={() => { setPage(1); load(keyword); }}
+            className="shrink-0 rounded-xl bg-brand text-white text-sm font-semibold px-5 whitespace-nowrap disabled:opacity-50"
+            disabled={loading}
+          >{loading ? '조회 중…' : '검색'}</button>
         </div>
-        <button onClick={load} className="btn-primary">
-          {loading ? '조회 중...' : '조회'}
-        </button>
       </div>
 
       <div className="space-y-2 no-print">
-        <p className="text-xs text-slate-500">총 {items.length}건 · 카드 클릭 시 상세 보기</p>
-        {items.map((it) => (
-          <button
-            type="button"
-            key={it.sessionId}
-            onClick={() => setSelected(it)}
-            className="card space-y-2 w-full text-left hover:shadow-md transition"
-          >
-            <div className="flex justify-between items-start">
-              <div>
+        <p className="text-xs text-slate-500">
+          {yearSel}년 · {bucket === '' ? '전체' : bucket === 'ok' ? '유효' : bucket === 'expiring' ? '만료임박' : '만료'} {filtered.length}건 · 만료 임박순 · 행 클릭 시 상세
+        </p>
+
+        {/* PC: 표 (만료 임박순) */}
+        <div className="hidden sm:block card p-0 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-slate-400 border-b border-slate-200 bg-slate-50">
+                <th className="text-left py-2 px-3">이름</th>
+                <th className="text-left px-2">소속</th>
+                <th className="text-left px-2">대상</th>
+                <th className="text-center px-2">상태</th>
+                <th className="text-left px-2">유효기간</th>
+                <th className="text-left px-2">남은일수</th>
+                <th className="text-left px-2">연락처</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((it) => (
+                <tr key={it.sessionId} onClick={() => setSelected(it)}
+                  className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer">
+                  <td className="py-2 px-3 font-bold text-slate-800 whitespace-nowrap">{it.name}</td>
+                  <td className="px-2 text-slate-600">{it.affiliation}</td>
+                  <td className="px-2 text-slate-600 whitespace-nowrap">{it.targetLabel}{it.vehicleNumber ? ` 🚗${it.vehicleNumber}` : ''}</td>
+                  <td className="px-2 text-center">{statusBadge(it.status)}</td>
+                  <td className="px-2 text-slate-700 whitespace-nowrap">{it.validUntil ? it.validUntil.substring(0, 10) : '-'}</td>
+                  <td className="px-2"><DaysChip validUntil={it.validUntil} /></td>
+                  <td className="px-2 whitespace-nowrap">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); togglePhone(it.sessionId); }}
+                      className="font-mono text-xs text-slate-600 hover:underline"
+                      title="클릭하면 전체 표시/가림"
+                    >{revealed.has(it.sessionId) ? it.phone : maskPhone(it.phone)}</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* 폰: 카드 */}
+        <div className="sm:hidden space-y-2">
+          {visible.map((it) => (
+            <button
+              type="button"
+              key={it.sessionId}
+              onClick={() => setSelected(it)}
+              className="card space-y-1.5 w-full text-left hover:shadow-md transition"
+            >
+              <div className="flex justify-between items-start gap-2">
                 <p className="font-bold text-slate-800">
-                  {it.name} <span className="font-normal text-slate-500">({it.affiliation})</span>
+                  {it.name} <span className="font-normal text-slate-500 text-xs">({it.affiliation})</span>
                 </p>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {it.targetLabel} · {it.phone}
-                </p>
-                {it.vehicleNumber && (
-                  <p className="text-xs font-mono text-slate-700 mt-0.5">
-                    🚗 {it.vehicleNumber}
-                  </p>
-                )}
+                {statusBadge(it.status)}
               </div>
-              {statusBadge(it.status)}
-            </div>
-            <div className="text-xs text-slate-600 grid grid-cols-2 gap-1">
-              <span>응시일: {formatDate(it.createdAt)}</span>
-              <span>수료일: {formatDate(it.completedAt)}</span>
-              <span>유효기간: {formatDate(it.validUntil)}</span>
-              {it.completionNumber && (
-                <span className="font-mono col-span-2">#{it.completionNumber}</span>
-              )}
-            </div>
-          </button>
-        ))}
-        {items.length === 0 && !loading && (
+              <p className="text-xs text-slate-500">
+                {it.targetLabel}{it.vehicleNumber ? ` · 🚗 ${it.vehicleNumber}` : ''} ·{' '}
+                <span
+                  role="button" tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); togglePhone(it.sessionId); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); togglePhone(it.sessionId); } }}
+                  className="font-mono hover:underline"
+                >{revealed.has(it.sessionId) ? it.phone : maskPhone(it.phone)}</span>
+              </p>
+              <p className="text-xs text-slate-600 flex items-center gap-2">
+                유효기간 {it.validUntil ? it.validUntil.substring(0, 10) : '-'} <DaysChip validUntil={it.validUntil} />
+              </p>
+            </button>
+          ))}
+        </div>
+
+        {filtered.length === 0 && !loading && (
           <div className="card text-center text-slate-500 py-8">조회 결과가 없습니다.</div>
+        )}
+
+        {/* 페이지네이션 (10개씩 — 3화면 공통) */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-3 pt-2">
+            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={curPage <= 1}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm text-slate-600 disabled:opacity-30">◀ 이전</button>
+            <span className="text-sm font-semibold text-slate-700">{curPage} / {totalPages}</span>
+            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={curPage >= totalPages}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm text-slate-600 disabled:opacity-30">다음 ▶</button>
+          </div>
         )}
       </div>
 

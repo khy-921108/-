@@ -13,6 +13,7 @@ import {
 } from '@/lib/company';
 import { isValidBizNo, bizNoDigits } from '@/lib/bizno';
 import BizNoField from '@/components/BizNoField';
+import StatCardButton from '@/components/StatCardButton';
 import {
   EQUIPMENT_TYPES,
   MEMBER_TYPES,
@@ -135,13 +136,16 @@ export default function AdminCompaniesPage() {
   const [creating, setCreating] = useState(false);
   const [viewingMembers, setViewingMembers] = useState<CompanyItem | null>(null);
   const [importing, setImporting] = useState(false);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
 
-  const load = async () => {
+  const load = async (statusOverride?: '' | CompanyStatus) => {
     setLoading(true);
+    const st = statusOverride !== undefined ? statusOverride : filterStatus;
     const params = new URLSearchParams();
     if (keyword) params.set('keyword', keyword);
     if (filterType) params.set('type', filterType);
-    if (filterStatus) params.set('status', filterStatus);
+    if (st) params.set('status', st);
     try {
       const res = await fetch(`/api/admin/companies?${params.toString()}`);
       const json = await res.json();
@@ -156,10 +160,17 @@ export default function AdminCompaniesPage() {
     }
   };
 
+  // 숫자 카드 클릭 = 상태 필터 전환
+  const pickStatus = (st: '' | CompanyStatus) => {
+    setFilterStatus(st);
+    setPage(1);
+    load(st);
+  };
+
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [filterType]);
 
   useEffect(() => {
     const onEsc = (e: KeyboardEvent) => {
@@ -191,54 +202,48 @@ export default function AdminCompaniesPage() {
         </div>
       </div>
 
+      {/* ① 숫자 카드 (클릭 = 상태 필터) — 3화면 공통 구조 */}
       <div className="grid grid-cols-4 gap-2">
-        <StatCard label="전체" value={stats.total} />
-        <StatCard label="검토중" value={stats.review} color="text-amber-700" />
-        <StatCard label="정식등록" value={stats.active} color="text-emerald-700" />
-        <StatCard label="사용중지" value={stats.disabled} color="text-slate-500" />
+        <StatCardButton label="전체" value={stats.total} active={filterStatus === ''} onClick={() => pickStatus('')} />
+        <StatCardButton label="검토중" value={stats.review} color="text-amber-700" active={filterStatus === 'REVIEW'} onClick={() => pickStatus('REVIEW')} />
+        <StatCardButton label="정식등록" value={stats.active} color="text-emerald-700" active={filterStatus === 'ACTIVE'} onClick={() => pickStatus('ACTIVE')} />
+        <StatCardButton label="사용중지" value={stats.disabled} color="text-slate-500" active={filterStatus === 'DISABLED'} onClick={() => pickStatus('DISABLED')} />
       </div>
 
       <div className="card space-y-3">
-        <input
+        {/* ② 필터 줄 — 구분만(명부 성격이라 시간 필터 없음) */}
+        <select
           className="input-base"
-          placeholder="업체명·담당자·사업자번호 검색"
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-        />
-        <div className="grid grid-cols-2 gap-2">
-          <select
-            className="input-base"
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value as '' | CompanyType)}
-          >
-            <option value="">구분: 전체</option>
-            {COMPANY_TYPES.map((t) => (
-              <option key={t.code} value={t.code}>
-                {t.label}
-              </option>
-            ))}
-          </select>
-          <select
-            className="input-base"
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value as '' | CompanyStatus)}
-          >
-            <option value="">상태: 전체</option>
-            {COMPANY_STATUS.map((s) => (
-              <option key={s.code} value={s.code}>
-                {s.label}
-              </option>
-            ))}
-          </select>
+          value={filterType}
+          onChange={(e) => { setFilterType(e.target.value as '' | CompanyType); setPage(1); }}
+        >
+          <option value="">구분: 전체</option>
+          {COMPANY_TYPES.map((t) => (
+            <option key={t.code} value={t.code}>
+              {t.label}
+            </option>
+          ))}
+        </select>
+        {/* ③ 통합 검색 */}
+        <div className="flex gap-2 items-stretch">
+          <input
+            className="input-base flex-1 min-w-0"
+            placeholder="업체명·담당자·사업자번호 검색"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); load(); } }}
+          />
+          <button
+            onClick={() => { setPage(1); load(); }}
+            className="shrink-0 rounded-xl bg-brand text-white text-sm font-semibold px-5 whitespace-nowrap disabled:opacity-50"
+            disabled={loading}
+          >{loading ? '조회 중…' : '검색'}</button>
         </div>
-        <button onClick={load} className="btn-primary">
-          {loading ? '조회 중...' : '조회'}
-        </button>
       </div>
 
       <div className="space-y-2">
         <p className="text-xs text-slate-500">총 {items.length}건 · 카드 클릭 시 수정, "인원" 클릭 시 소속 인원 보기</p>
-        {items.map((it) => {
+        {items.slice((Math.min(page, Math.max(1, Math.ceil(items.length / PAGE_SIZE))) - 1) * PAGE_SIZE, Math.min(page, Math.max(1, Math.ceil(items.length / PAGE_SIZE))) * PAGE_SIZE).map((it) => {
           const rules = companyFieldRules(it.company_type);
           const missing = it.status !== 'DISABLED' ? approvalMissingFields(it) : [];
           const bizBroken = !!it.biz_no && !isValidBizNo(it.biz_no);
@@ -316,6 +321,21 @@ export default function AdminCompaniesPage() {
         {items.length === 0 && !loading && (
           <div className="card text-center text-slate-500 py-8">조회 결과가 없습니다.</div>
         )}
+
+        {/* 페이지네이션 (10개씩 — 3화면 공통) */}
+        {items.length > PAGE_SIZE && (() => {
+          const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+          const cur = Math.min(page, totalPages);
+          return (
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={cur <= 1}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm text-slate-600 disabled:opacity-30">◀ 이전</button>
+              <span className="text-sm font-semibold text-slate-700">{cur} / {totalPages}</span>
+              <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={cur >= totalPages}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm text-slate-600 disabled:opacity-30">다음 ▶</button>
+            </div>
+          );
+        })()}
       </div>
 
       {(editing || creating) && (

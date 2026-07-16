@@ -20,44 +20,56 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const keyword = (url.searchParams.get('keyword') ?? '').trim();
   const month = (url.searchParams.get('month') ?? '').trim(); // 조회 월 (YYYY-MM, KST)
+  const year = (url.searchParams.get('year') ?? '').trim();   // 조회 년 (YYYY, KST) — 년별 전환
 
   const supabase = createServiceClient();
-  let q = supabase
-    .from('work_permits')
-    .select(
-      `id, permit_number, permit_type, request_company_name, work_name, work_start, work_end,
-       applicant_name, supplemental, status, approved_by, approved_at, created_at,
-       issuer_signature, started_at, completion, tbm, dept_confirmations`
-    )
-    .order('work_start', { ascending: false })
-    .limit(500);
-
-  if (keyword) {
-    const safe = keyword.replace(/[%,]/g, ' ').trim();
-    if (safe) {
-      q = q.or(
-        `permit_number.ilike.%${safe}%,request_company_name.ilike.%${safe}%,work_name.ilike.%${safe}%,applicant_name.ilike.%${safe}%`
-      );
-    }
-  }
-
-  // 조회 월과 작업기간(work_start~work_end)이 겹치는 허가서 — KST 기준
-  //  겹침 조건: work_start <= 월말 AND work_end >= 월초
+  // 겹침 범위(KST): 월별 또는 년별. 조건: work_start <= 범위끝 AND work_end >= 범위시작
+  let rangeStart = '';
+  let rangeEnd = '';
   if (/^\d{4}-\d{2}$/.test(month)) {
     const [y, m] = month.split('-').map(Number);
     const lastDay = new Date(y, m, 0).getDate();
-    const monthStart = `${month}-01T00:00:00+09:00`;
-    const monthEnd = `${month}-${String(lastDay).padStart(2, '0')}T23:59:59+09:00`;
-    q = q.lte('work_start', monthEnd).gte('work_end', monthStart);
+    rangeStart = `${month}-01T00:00:00+09:00`;
+    rangeEnd = `${month}-${String(lastDay).padStart(2, '0')}T23:59:59+09:00`;
+  } else if (/^\d{4}$/.test(year)) {
+    rangeStart = `${year}-01-01T00:00:00+09:00`;
+    rangeEnd = `${year}-12-31T23:59:59+09:00`;
   }
 
-  const { data: permits, error } = await q;
-  if (error) {
-    console.error('[admin/work-permits] error:', error);
-    return NextResponse.json(
-      { success: false, code: 'QUERY_FAILED', message: error.message },
-      { status: 500 }
-    );
+  // 년별 조회는 500건을 넘을 수 있어 페이지네이션으로 전량 조회(누락 방지)
+  const permits: any[] = [];
+  const size = 1000;
+  let from = 0;
+  for (;;) {
+    let q = supabase
+      .from('work_permits')
+      .select(
+        `id, permit_number, permit_type, request_company_name, work_name, work_start, work_end,
+         applicant_name, supplemental, status, approved_by, approved_at, created_at,
+         issuer_signature, started_at, completion, tbm, dept_confirmations`
+      )
+      .order('work_start', { ascending: false });
+    if (keyword) {
+      const safe = keyword.replace(/[%,]/g, ' ').trim();
+      if (safe) {
+        q = q.or(
+          `permit_number.ilike.%${safe}%,request_company_name.ilike.%${safe}%,work_name.ilike.%${safe}%,applicant_name.ilike.%${safe}%`
+        );
+      }
+    }
+    if (rangeStart) q = q.lte('work_start', rangeEnd).gte('work_end', rangeStart);
+    const { data, error } = await q.range(from, from + size - 1);
+    if (error) {
+      console.error('[admin/work-permits] error:', error);
+      return NextResponse.json(
+        { success: false, code: 'QUERY_FAILED', message: error.message },
+        { status: 500 }
+      );
+    }
+    if (!data || data.length === 0) break;
+    permits.push(...data);
+    if (data.length < size) break;
+    from += size;
   }
 
   // 참여자 수 집계
