@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
-import { isCompanyType, isCompanyStatus, approvalMissingFields, companyFieldRules, type CompanyType } from '@/lib/company';
+import { isCompanyType, isCompanyStatus, validateCompanyInput, enforceCompanyName, type CompanyType } from '@/lib/company';
 import { isValidBizNo, formatBizNo } from '@/lib/bizno';
 import { checkBizStatus } from '@/lib/bizno-server';
 import { sendSms } from '@/lib/sms';
@@ -145,7 +145,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
       );
     }
 
-    // 병합 후 값 기준으로 구분 규칙 검사(3개 문 공통)
+    // 병합 후 값 기준으로 공용 검증(다른 문 3개와 동일 규칙 — validateCompanyInput + 체크섬 항상)
     const merged = {
       company_type: (update.company_type as string) ?? before.company_type,
       name: (update.name as string) ?? before.name,
@@ -156,25 +156,40 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
       tel: update.tel !== undefined ? (update.tel as string | null) : before.tel,
       status: (update.status as string) ?? before.status,
     };
-    // 일반·장비: 담당자명·연락처 필수(수정으로 비우는 것 차단)
-    const rules = companyFieldRules(merged.company_type as CompanyType);
-    if (rules.managerRequired) {
-      if (!(merged.manager_name ?? '').trim() || !(merged.phone ?? '').trim()) {
+    // 개인작업자 = "개인(이름)" 형식 서버 강제
+    if (merged.company_type === 'INDIVIDUAL') {
+      const forced = enforceCompanyName('INDIVIDUAL', merged.name ?? '');
+      if (!forced) {
         return NextResponse.json(
-          { success: false, code: 'INVALID_INPUT', message: '일반·장비업체는 담당자명·연락처가 필수입니다.' },
+          { success: false, code: 'INVALID_INPUT', message: '개인작업자는 이름이 필요합니다(개인(이름) 형식).' },
           { status: 400 }
         );
       }
+      merged.name = forced;
+      update.name = forced;
     }
-    // 정식등록(ACTIVE)으로 두는/바꾸는 경우 승인 필수(사업자번호·주소·대표번호)
-    if (merged.status === 'ACTIVE') {
-      const missing = approvalMissingFields(merged);
-      if (missing.length > 0) {
-        return NextResponse.json(
-          { success: false, code: 'APPROVAL_BLOCKED', message: `정식등록에는 ${missing.join('·')}이(가) 필요합니다. 업체에 확인 후 입력하세요.` },
-          { status: 400 }
-        );
-      }
+    const vErrors = validateCompanyInput({
+      companyType: merged.company_type as CompanyType,
+      name: merged.name ?? '',
+      managerName: merged.manager_name,
+      phone: merged.phone,
+      targetStatus: merged.status,
+      bizNo: merged.biz_no,
+      address: merged.address,
+      tel: merged.tel,
+    });
+    if (vErrors.length > 0) {
+      return NextResponse.json(
+        { success: false, code: 'INVALID_INPUT', message: vErrors[0] },
+        { status: 400 }
+      );
+    }
+    // 체크섬: 병합 결과에 항상 적용 — 체크섬 틀린 기존 번호를 안고는 승인·수정 불가(수정으로 고치게)
+    if ((merged.biz_no ?? '').trim() && !isValidBizNo(merged.biz_no)) {
+      return NextResponse.json(
+        { success: false, code: 'INVALID_BIZNO', message: '저장된 사업자번호가 형식상 불가능합니다. 사업자번호를 함께 수정해 주세요.' },
+        { status: 400 }
+      );
     }
 
     // 사업자번호가 새로 들어오면 국세청 재확인(best-effort)

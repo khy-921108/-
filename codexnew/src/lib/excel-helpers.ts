@@ -13,6 +13,7 @@ import {
   isCompanyStatus,
   isCompanyType,
   validateCompanyInput,
+  enforceCompanyName,
   type CompanyStatus,
   type CompanyType,
 } from './company';
@@ -262,10 +263,16 @@ export async function parseCompaniesWorkbook(buffer: ArrayBuffer | Buffer): Prom
         continue;
       }
 
+      // 개인작업자 = "개인(이름)" 형식 강제(다른 문과 동일)
+      const finalName = enforceCompanyName(companyType, name);
+      if (!finalName) {
+        errors.push({ sheet: COMPANY_SHEET_NAME, rowIndex: r, field: '업체명', message: '개인작업자는 이름이 필요합니다(개인(이름) 형식).' });
+        continue;
+      }
       // 구분별 규칙 + 정식등록 필수(3개 문 공통 규칙) — 실패 행은 반영 안 함
       const phoneDigits = normalizePhone(phone) || '';
       const vErrors = validateCompanyInput({
-        companyType, name, managerName, phone: phoneDigits,
+        companyType, name: finalName, managerName, phone: phoneDigits,
         targetStatus: status, bizNo, address, tel,
       });
       if (vErrors.length > 0) {
@@ -280,7 +287,7 @@ export async function parseCompaniesWorkbook(buffer: ArrayBuffer | Buffer): Prom
 
       companies.push({
         rowIndex: r,
-        name,
+        name: finalName,
         bizNo: bizNo ? formatBizNo(bizNo) : null,
         companyType,
         managerName: managerName || null,

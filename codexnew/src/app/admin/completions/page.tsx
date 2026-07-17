@@ -73,11 +73,15 @@ function maskPhone(phone: string): string {
   return `${d.slice(0, 3)}-****-${d.slice(-4)}`;
 }
 
-/** 남은일수 색칩: 🟢31일↑ / 🟡30일 이내 / 🔴만료 */
+/** 남은일수 색칩: 🟢31일↑ / 🟡30일 이내 / 🔴만료(경계: 시각이 지났으면 D-0이어도 만료) */
 function DaysChip({ validUntil }: { validUntil: string | null }) {
-  const d = daysLeftOf(validUntil);
-  if (d === null) return <span className="text-[11px] text-slate-300">-</span>;
-  if (d < 0) return <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700">🔴 만료 {Math.abs(d)}일</span>;
+  if (!validUntil) return <span className="text-[11px] text-slate-300">-</span>;
+  // 만료 시각이 이미 지났으면 남은일수 계산 전에 만료 처리(만료 당일 🟡 D-0 오표시 방지)
+  if (new Date(validUntil).getTime() <= Date.now()) {
+    const over = Math.max(0, Math.floor((Date.now() - new Date(validUntil).getTime()) / (24 * 3600 * 1000)));
+    return <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700">🔴 만료{over > 0 ? ` ${over}일` : ''}</span>;
+  }
+  const d = daysLeftOf(validUntil) ?? 0;
   if (d <= 30) return <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-700">🟡 D-{d}</span>;
   return <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-700">🟢 D-{d}</span>;
 }
@@ -176,12 +180,20 @@ export default function AdminCompletionsPage() {
     <main className="space-y-4">
       <h1 className="text-xl font-bold text-slate-800 no-print">수료 현황</h1>
 
-      {/* ① 숫자 카드 (클릭 = 필터) — 3화면 공통 구조 */}
+      {/* ① 숫자 카드 (클릭 = 필터 + 검색어·대상 초기화 — 카드 숫자와 목록 일치) */}
       <div className="grid grid-cols-4 gap-2 no-print">
-        <StatCardButton label="전체" value={items.length} active={bucket === ''} onClick={() => { setBucket(''); setPage(1); }} />
-        <StatCardButton label="✅ 유효" value={counts.ok} color="text-emerald-700" active={bucket === 'ok'} onClick={() => { setBucket('ok'); setPage(1); }} />
-        <StatCardButton label="⚠ 만료임박" value={counts.expiring} color="text-amber-700" active={bucket === 'expiring'} onClick={() => { setBucket('expiring'); setPage(1); }} />
-        <StatCardButton label="🔴 만료" value={counts.expired} color="text-red-600" active={bucket === 'expired'} onClick={() => { setBucket('expired'); setPage(1); }} />
+        {([
+          { key: '', label: '전체', n: items.length, color: undefined },
+          { key: 'ok', label: '✅ 유효', n: counts.ok, color: 'text-emerald-700' },
+          { key: 'expiring', label: '⚠ 만료임박', n: counts.expiring, color: 'text-amber-700' },
+          { key: 'expired', label: '🔴 만료', n: counts.expired, color: 'text-red-600' },
+        ] as const).map((c) => (
+          <StatCardButton key={c.key || 'all'} label={c.label} value={c.n} color={c.color} active={bucket === c.key}
+            onClick={() => {
+              setBucket(c.key); setPage(1);
+              if (keyword || targetType) { setKeyword(''); setTargetType(''); load('', yearSel, ''); }
+            }} />
+        ))}
       </div>
 
       <div className="card space-y-3 no-print">

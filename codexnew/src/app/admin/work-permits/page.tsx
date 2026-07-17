@@ -117,12 +117,17 @@ export default function AdminWorkPermitsPage() {
     <main className="space-y-4">
       <h1 className="text-xl font-bold text-slate-800">작업허가 신청 목록</h1>
 
-      {/* ① 숫자 카드 (클릭 = 필터) — 3화면 공통 구조 */}
+      {/* ① 숫자 카드 (클릭 = 필터 + 검색어 초기화 — 카드 숫자와 목록 일치) */}
       <div className="grid grid-cols-4 gap-2">
-        <StatCardButton label="전체" value={items.length} active={tab === 'all'} onClick={() => { setTab('all'); setPage(1); }} />
-        <StatCardButton label="🖊 처리 필요" value={counts.todo} color="text-amber-700" active={tab === 'todo'} onClick={() => { setTab('todo'); setPage(1); }} />
-        <StatCardButton label="🔵 작업 중" value={counts.active} color="text-emerald-700" active={tab === 'active'} onClick={() => { setTab('active'); setPage(1); }} />
-        <StatCardButton label="끝난 것" value={counts.done} color="text-slate-500" active={tab === 'done'} onClick={() => { setTab('done'); setPage(1); }} />
+        {([
+          { key: 'all', label: '전체', n: items.length, color: undefined },
+          { key: 'todo', label: '🖊 처리 필요', n: counts.todo, color: 'text-amber-700' },
+          { key: 'active', label: '🔵 작업 중', n: counts.active, color: 'text-emerald-700' },
+          { key: 'done', label: '끝난 것', n: counts.done, color: 'text-slate-500' },
+        ] as const).map((c) => (
+          <StatCardButton key={c.key} label={c.label} value={c.n} color={c.color} active={tab === c.key}
+            onClick={() => { setTab(c.key); setPage(1); if (keyword) { setKeyword(''); load(''); } }} />
+        ))}
       </div>
 
       <div className="card space-y-3">

@@ -139,12 +139,14 @@ export default function AdminCompaniesPage() {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
 
-  const load = async (statusOverride?: '' | CompanyStatus) => {
+  const load = async (opts?: { status?: '' | CompanyStatus; type?: '' | CompanyType; kw?: string }) => {
     setLoading(true);
-    const st = statusOverride !== undefined ? statusOverride : filterStatus;
+    const st = opts?.status !== undefined ? opts.status : filterStatus;
+    const ty = opts?.type !== undefined ? opts.type : filterType;
+    const kw = opts?.kw !== undefined ? opts.kw : keyword;
     const params = new URLSearchParams();
-    if (keyword) params.set('keyword', keyword);
-    if (filterType) params.set('type', filterType);
+    if (kw) params.set('keyword', kw);
+    if (ty) params.set('type', ty);
     if (st) params.set('status', st);
     try {
       const res = await fetch(`/api/admin/companies?${params.toString()}`);
@@ -160,11 +162,13 @@ export default function AdminCompaniesPage() {
     }
   };
 
-  // 숫자 카드 클릭 = 상태 필터 전환
+  // 숫자 카드 클릭 = 상태 필터 전환 + 구분·검색어 초기화(카드 숫자와 목록 일치 보장)
   const pickStatus = (st: '' | CompanyStatus) => {
     setFilterStatus(st);
+    setFilterType('');
+    setKeyword('');
     setPage(1);
-    load(st);
+    load({ status: st, type: '', kw: '' });
   };
 
   useEffect(() => {

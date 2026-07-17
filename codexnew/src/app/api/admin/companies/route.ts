@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
-import { isCompanyType, isCompanyStatus, validateCompanyInput, type CompanyType } from '@/lib/company';
+import { isCompanyType, isCompanyStatus, validateCompanyInput, enforceCompanyName, type CompanyType } from '@/lib/company';
 import { isValidBizNo, formatBizNo } from '@/lib/bizno';
 import { checkBizStatus } from '@/lib/bizno-server';
 export const dynamic = 'force-dynamic';
@@ -99,9 +99,17 @@ export async function POST(req: Request) {
     const telDigits = typeof body.tel === 'string' ? body.tel.replace(/[^0-9]/g, '') : '';
     const noteRaw = typeof body.note === 'string' ? body.note.trim() : '';
 
+    // 개인작업자 = "개인(이름)" 형식 서버 강제
+    const finalName = enforceCompanyName(companyType, name);
+    if (!finalName) {
+      return NextResponse.json(
+        { success: false, code: 'INVALID_INPUT', message: '개인작업자는 이름이 필요합니다(개인(이름) 형식).' },
+        { status: 400 }
+      );
+    }
     // 구분별 규칙 + 정식등록(ACTIVE) 승인 필수 검사(3개 문 공통 규칙)
     const vErrors = validateCompanyInput({
-      companyType, name, managerName: managerNameRaw, phone: phoneDigits,
+      companyType, name: finalName, managerName: managerNameRaw, phone: phoneDigits,
       targetStatus: status, bizNo: bizNoRaw, address: addressRaw, tel: telDigits,
     });
     if (vErrors.length > 0) {
@@ -124,7 +132,7 @@ export async function POST(req: Request) {
     const { data, error } = await supabase
       .from('companies')
       .insert({
-        name,
+        name: finalName,
         biz_no: bizNoRaw ? formatBizNo(bizNoRaw) : null,
         company_type: companyType,
         manager_name: managerNameRaw || null,

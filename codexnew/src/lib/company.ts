@@ -117,6 +117,20 @@ export function approvalMissingFields(c: {
 }
 
 /**
+ * 개인작업자 업체명 강제: INDIVIDUAL 이면 항상 "개인(이름)" 형식.
+ * 직접 API 호출로 임의 업체명이 들어오는 것 차단(서버 4개 문 공통).
+ * 이미 "개인(...)" 형식이면 그대로, 아니면 입력값을 이름으로 감싼다.
+ */
+export function enforceCompanyName(companyType: CompanyType, name: string): string {
+  const n = name.trim();
+  if (companyType !== 'INDIVIDUAL') return n;
+  if (/^개인\(.+\)$/.test(n)) return n;
+  // "개인(" 조각/빈 괄호 등 변형도 이름만 추출해 재구성
+  const inner = n.replace(/^개인\s*\(?/, '').replace(/\)?$/, '').trim();
+  return inner ? `개인(${inner})` : '';
+}
+
+/**
  * 구분별 등록/수정 입력 검증(3개 문 공통 — 공개 등록·관리자·엑셀).
  * 반환 = 오류 메시지 목록(빈 배열 = 통과). 체크섬 검사는 호출부가 isValidBizNo 로.
  */

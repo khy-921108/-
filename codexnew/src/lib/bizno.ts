@@ -24,6 +24,8 @@ export function formatBizNo(v: string): string {
 export function isValidBizNo(v: unknown): boolean {
   const d = bizNoDigits(v as string);
   if (d.length !== 10) return false;
+  // 열 자리 전부 같은 숫자(0000000000 등) = 명백한 가짜 → 체크섬 계산 전 즉시 거부(국세청 호출 낭비 차단)
+  if (/^(\d)\1{9}$/.test(d)) return false;
   const w = [1, 3, 7, 1, 3, 7, 1, 3, 5];
   let sum = 0;
   for (let i = 0; i < 9; i++) sum += Number(d[i]) * w[i];
