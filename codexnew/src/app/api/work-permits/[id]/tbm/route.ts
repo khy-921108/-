@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { normalizePhone } from '@/lib/equipment';
 import { evaluateParticipant } from '@/lib/participant-eligibility';
+import { evaluateRequiredDocs } from '@/lib/safety-doc-status';
 import { sendSms } from '@/lib/sms';
 import { isValidSignature, isValidPhoto, MAX_PHOTO_BYTES } from '@/lib/upload-validate';
 
@@ -54,7 +55,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   const { data: permit, error } = await withTimeout(
     supabase
       .from('work_permits')
-      .select('id, permit_number, work_name, status, applicant_name, applicant_birth_date, applicant_phone, issuer_signature, tbm, started_at, work_end, completion, supplemental, field_joins, equipment_arrivals, request_company_name')
+      .select('id, permit_number, work_name, status, applicant_name, applicant_birth_date, applicant_phone, issuer_signature, tbm, started_at, work_end, completion, supplemental, field_joins, equipment_arrivals, request_company_name, request_company_id')
       .eq('id', permitId)
       .maybeSingle(),
     'select'
@@ -224,9 +225,18 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
 
   // ── join: 현장 합류자 추가 (append 전용 — 개시 후에도 가능, 종료신고 후 불가) ──
   //  기존 기록 수정·삭제 잠금과 별개: 참여자·서명·합류기록을 "추가"만 한다.
+  // 작업일 경과 판정(join·arrival 공용 — submit 과 동일 규칙)
+  const p2g = (n: number) => String(n).padStart(2, '0');
+  const kstYmdG = (ms: number) => { const k = new Date(ms + 9 * 3600 * 1000); return `${k.getUTCFullYear()}-${p2g(k.getUTCMonth() + 1)}-${p2g(k.getUTCDate())}`; };
+  const workDayPassed = !!permit.work_end && kstYmdG(new Date(permit.work_end).getTime()) < kstYmdG(Date.now());
+
   if (action === 'join') {
     if (isSigStr(compTbm.workerSignature) || isSigStr(compTbm.confirmSignature)) {
       return NextResponse.json({ success: false, code: 'ALREADY_REPORTED', message: '종료신고 이후에는 합류자를 추가할 수 없습니다.' }, { status: 409 });
+    }
+    // (J-3) 작업일 경과 시 합류 불가 — submit 과 동일 규칙
+    if (workDayPassed) {
+      return NextResponse.json({ success: false, code: 'WORK_DAY_PASSED', message: '작업일이 지난 허가서입니다. 새로 신청해 주세요.' }, { status: 400 });
     }
     const jName = (body?.joinName ?? '').toString().trim();
     const jBirth = (body?.joinBirthDate ?? '').toString().trim();
@@ -249,12 +259,48 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
         { status: 403 }
       );
     }
-    // 1단계(확인만): 수료·소속 정보 반환하고 저장하지 않음 — 화면에서 설명확인+서명 후 재호출
+    // (J-1) 필수서류(개인서약·이행각서) — 신청 경로와 동일 검증
+    let docsResult: any = null;
+    try {
+      docsResult = await withTimeout(
+        evaluateRequiredDocs(supabase, {
+          companyId: permit.request_company_id ?? '',
+          participants: [{ name: jName, birthDate: jBirth, phone: jPhone }],
+          workEnd: permit.work_end,
+        }),
+        'docs'
+      );
+    } catch (e) {
+      console.error('[tbm join] docs check:', e);
+      return NextResponse.json({ success: false, code: 'DOCS_CHECK_FAILED', message: '필수서류 확인 중 오류가 발생했습니다.' }, { status: 500 });
+    }
+    const pledgeOk = docsResult.pledges?.[0]?.status === 'VALID';
+    const undertakingOk = docsResult.undertaking?.status === 'VALID';
+    const docsMissing: string[] = [];
+    if (!pledgeOk) docsMissing.push('개인 안전준수 서약');
+    if (!undertakingOk) docsMissing.push(docsResult.undertaking?.status === 'STALE_MEMBERS' ? '이행각서 명단 추가' : '업체 이행각서');
+
+    // 1단계(확인만): 수료·소속 + 서류 미비 여부 반환(저장 안 함)
     if (body?.checkOnly === true) {
       return NextResponse.json({
         success: true,
-        data: { eligible: true, name: jName, companyName: elig.companyName, targetLabel: elig.targetLabel, expiresAt: elig.expiresAt },
+        data: {
+          eligible: true, name: jName, companyName: elig.companyName, targetLabel: elig.targetLabel, expiresAt: elig.expiresAt,
+          docsOk: docsMissing.length === 0,
+          docsMissing,
+          pledgeOk,
+          undertakingStatus: docsResult.undertaking?.status ?? 'MISSING',
+          undertakingManagerName: docsResult.undertaking?.managerName ?? null,
+          companyId: permit.request_company_id ?? null,
+        },
       });
+    }
+    // 미비 시 403 — 화면에서 그 자리 처리 후 재시도
+    if (docsMissing.length > 0) {
+      return NextResponse.json(
+        { success: false, code: 'DOCS_REQUIRED', message: `필수서류 미비: ${docsMissing.join(', ')}. 작성 후 다시 시도해 주세요.`, data: { docsMissing } },
+        { status: 403 }
+      );
     }
     if (body?.briefed !== true) {
       return NextResponse.json({ success: false, code: 'NOT_BRIEFED', message: '위험요인·안전대책 설명 확인이 필요합니다.' }, { status: 400 });
@@ -268,6 +314,8 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     const { error: insErr } = await withTimeout(
       supabase.from('work_permit_participants').insert({
         work_permit_id: permitId,
+        session_id: elig.sessionId,   // (J-2) eligibility 결과값
+        company_id: elig.companyId,
         name: jName,
         phone: jPhone,
         company_name: elig.companyName ?? permit.request_company_name,
@@ -304,6 +352,18 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   if (action === 'arrival') {
     if (isSigStr(compTbm.confirmSignature)) {
       return NextResponse.json({ success: false, code: 'ALREADY_CLOSED', message: '종료확인 이후에는 장비 도착을 등록할 수 없습니다.' }, { status: 409 });
+    }
+    // (A-1) 중장비·굴착 허가서에만 허용
+    if (suppTbm.heavy !== 'Y' && suppTbm.excavation !== 'Y') {
+      return NextResponse.json({ success: false, code: 'NOT_APPLICABLE', message: '장비 도착 등록은 중장비·굴착 허가서에서만 가능합니다.' }, { status: 400 });
+    }
+    // (J-3) 작업일 경과 시 등록 불가
+    if (workDayPassed) {
+      return NextResponse.json({ success: false, code: 'WORK_DAY_PASSED', message: '작업일이 지난 허가서입니다. 새로 신청해 주세요.' }, { status: 400 });
+    }
+    // (A-2) 등록 건수 상한
+    if (arrivals.length >= 20) {
+      return NextResponse.json({ success: false, code: 'TOO_MANY', message: '장비 도착 등록은 최대 20건까지입니다.' }, { status: 400 });
     }
     const aType = (body?.equipType ?? '').toString().trim();
     const aVehicle = (body?.vehicleNumber ?? '').toString().trim();

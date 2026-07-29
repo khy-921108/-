@@ -199,6 +199,7 @@ export default function WorkPermitStart() {
           <div>
             <p className="font-bold text-slate-700">허가서가 필요한 작업</p>
             <p>화기·고소·밀폐·전기·중장비 등 위험작업과 공사성 작업. <span className="text-slate-400">(단순 납품·하역·방문은 출입증만으로 가능)</span></p>
+            <p className="text-xs text-slate-500 mt-0.5">※ 중장비 = 크레인·굴착기·고소작업차·사다리차 등 동력 장비가 공장 안에서 작업하는 경우 (사람이 높이 올라가면 '고소'도 함께 체크)</p>
           </div>
           <div>
             <p className="font-bold text-slate-700">준비물</p>

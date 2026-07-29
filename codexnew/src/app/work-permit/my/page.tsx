@@ -166,8 +166,8 @@ export default function MyWorkPermits() {
   };
 
   const openReport = (it: Item) => {
-    // 중장비인데 장비 도착 등록 0건 → 확인 문구만(차단 없음)
-    if (it.supplemental?.heavy === 'Y' && (it.arrivalsCount ?? 0) === 0) {
+    // 중장비·굴착인데 장비 도착 등록 0건 → 확인 문구만(차단 없음)
+    if ((it.supplemental?.heavy === 'Y' || it.supplemental?.excavation === 'Y') && (it.arrivalsCount ?? 0) === 0) {
       if (!confirm('장비 도착 등록 없이 종료합니다(크레인 미사용 등). 계속하시겠습니까?')) return;
     }
     setReportSig(''); setReportErr(''); setReportFor(it);

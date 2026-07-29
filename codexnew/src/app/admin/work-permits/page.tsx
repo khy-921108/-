@@ -221,7 +221,7 @@ export default function AdminWorkPermitsPage() {
                   {supp.length > 0 && (
                     <p className="text-xs text-amber-700 mt-0.5">
                       보충: {supp.join(', ')}
-                      {it.supplemental?.heavy === 'Y' && (it.arrivalsCount ?? 0) === 0 && (
+                      {(it.supplemental?.heavy === 'Y' || it.supplemental?.excavation === 'Y') && (it.arrivalsCount ?? 0) === 0 && (
                         <span className="ml-1 rounded bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5">⚠ 장비 미등록</span>
                       )}
                     </p>

@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import SignaturePad from '@/components/SignaturePad';
+import { PLEDGE_INTRO, PLEDGE_CLAUSES } from '@/lib/work-permit-constants';
 
 interface Cred { name: string; birthDate: string; phone: string }
 interface RosterItem { name: string; companyName: string; confirmed: boolean }
@@ -64,6 +65,13 @@ export default function SiteTbmPage() {
   const [joinSig, setJoinSig] = useState('');
   const [joinBusy, setJoinBusy] = useState(false);
   const [joinMsg, setJoinMsg] = useState('');
+  // 합류자 필수서류 그 자리 처리(개인서약 작성 / 이행각서 명단 추가)
+  const [plForm, setPlForm] = useState({ nationality: '한국', bloodType: 'A형', jobType: '' });
+  const [plConfirm, setPlConfirm] = useState(false);
+  const [plSig, setPlSig] = useState('');
+  const [plBusy, setPlBusy] = useState(false);
+  const [utManager, setUtManager] = useState('');
+  const [utBusy, setUtBusy] = useState(false);
 
   // 장비 도착 등록
   const arrFileRef = useRef<HTMLInputElement>(null);
@@ -163,6 +171,49 @@ export default function SiteTbmPage() {
       return;
     }
     setJoinCand(json.data); setJoinBriefed(false); setJoinSig('');
+    setPlForm({ nationality: '한국', bloodType: 'A형', jobType: '' }); setPlConfirm(false); setPlSig('');
+    setUtManager(json.data?.undertakingManagerName ?? '');
+  };
+
+  // 합류자 개인서약 그 자리 작성 → 재확인
+  const issueJoinPledge = async () => {
+    if (!joinCand) return;
+    if (!plForm.jobType.trim()) { setJoinMsg('직종을 입력해 주세요.'); return; }
+    if (!plConfirm) { setJoinMsg('서약 내용 확인에 동의해 주세요.'); return; }
+    if (!plSig) { setJoinMsg('서약자 본인 서명을 입력해 주세요.'); return; }
+    setPlBusy(true); setJoinMsg('');
+    try {
+      const res = await fetch('/api/safety-pledges', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: joinForm.name.trim(), birthDate: joinForm.birthDate, phone: joinForm.phone,
+          companyId: joinCand.companyId, nationality: plForm.nationality, bloodType: plForm.bloodType,
+          jobType: plForm.jobType.trim(), signature: plSig,
+        }),
+      });
+      const j = await res.json();
+      if (!j.success) { setJoinMsg(j.message || '서약서 발급 실패'); return; }
+      await checkJoin(); // 서류 상태 재확인
+    } catch { setJoinMsg('네트워크 오류'); } finally { setPlBusy(false); }
+  };
+
+  // 이행각서 명단에 합류자 추가 재발급 → 재확인
+  const reissueUndertaking = async () => {
+    if (!joinCand?.companyId) { setJoinMsg('업체 정보가 없어 각서를 재발급할 수 없습니다.'); return; }
+    if (!utManager.trim()) { setJoinMsg('관리감독자명을 입력해 주세요.'); return; }
+    setUtBusy(true); setJoinMsg('');
+    try {
+      const res = await fetch('/api/company-undertakings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: joinCand.companyId, managerName: utManager.trim(),
+          members: [{ name: joinForm.name.trim(), birthDate: joinForm.birthDate, phone: joinForm.phone }],
+        }),
+      });
+      const j = await res.json();
+      if (!j.success) { setJoinMsg(j.message || '이행각서 재발급 실패'); return; }
+      await checkJoin();
+    } catch { setJoinMsg('네트워크 오류'); } finally { setUtBusy(false); }
   };
 
   // 합류자 2단계: 설명 확인 + 서명 → 등록
@@ -342,17 +393,70 @@ export default function SiteTbmPage() {
               {joinCand && (
                 <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 space-y-2">
                   <p className="text-sm text-emerald-800 font-bold">✅ 교육 유효 — {joinCand.name} ({joinCand.companyName ?? '소속 미상'}{joinCand.targetLabel ? ` · ${joinCand.targetLabel}` : ''})</p>
-                  <label className="flex items-start gap-2 text-sm text-slate-700">
-                    <input type="checkbox" className="mt-0.5" checked={joinBriefed} onChange={(e) => setJoinBriefed(e.target.checked)} />
-                    <span>이 작업의 <b>위험요인·안전대책을 설명받았습니까?</b> (설명 완료 확인)</span>
-                  </label>
-                  <div>
-                    <label className="label">합류자 본인 서명 <span className="text-red-500">*</span></label>
-                    <SignaturePad onChange={setJoinSig} />
-                  </div>
-                  <button onClick={submitJoin} disabled={joinBusy || !joinBriefed || !joinSig} className="btn-primary w-full text-sm">
-                    {joinBusy ? '등록 중…' : '합류 등록 (시각 기록)'}
-                  </button>
+
+                  {/* 필수서류 미비 — 그 자리에서 처리 */}
+                  {!joinCand.docsOk && (
+                    <div className="rounded-lg bg-amber-50 border border-amber-300 p-2 space-y-2">
+                      <p className="text-xs font-bold text-amber-800">⚠ 필수서류 미비: {(joinCand.docsMissing ?? []).join(', ')}</p>
+
+                      {!joinCand.pledgeOk && (
+                        <div className="space-y-2 border-t border-amber-200 pt-2">
+                          <p className="text-xs font-bold text-slate-700">📝 개인 안전준수 서약 작성 (그 자리 처리)</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <select className="input-base text-sm" value={plForm.nationality} onChange={(e) => setPlForm({ ...plForm, nationality: e.target.value })}>
+                              {['한국', '中国', 'Việt Nam', '기타'].map((n) => <option key={n} value={n}>{n}</option>)}
+                            </select>
+                            <select className="input-base text-sm" value={plForm.bloodType} onChange={(e) => setPlForm({ ...plForm, bloodType: e.target.value })}>
+                              {['A형', 'B형', 'O형', 'AB형'].map((b) => <option key={b} value={b}>{b}</option>)}
+                            </select>
+                          </div>
+                          <input className="input-base text-sm" placeholder="직종 (예: 크레인 기사)" value={plForm.jobType} onChange={(e) => setPlForm({ ...plForm, jobType: e.target.value })} />
+                          <details className="rounded bg-white border border-slate-200 p-2 text-[11px] leading-relaxed text-slate-600">
+                            <summary className="cursor-pointer font-bold">서약 내용 보기</summary>
+                            <p className="mt-1">{PLEDGE_INTRO}</p>
+                            <ol className="list-decimal pl-4 mt-1 space-y-0.5">{PLEDGE_CLAUSES.map((c, ci) => <li key={ci}>{c}</li>)}</ol>
+                          </details>
+                          <label className="flex items-start gap-2 text-xs text-slate-700">
+                            <input type="checkbox" className="mt-0.5" checked={plConfirm} onChange={(e) => setPlConfirm(e.target.checked)} />
+                            <span>위 서약 내용을 확인하였으며 동의합니다.</span>
+                          </label>
+                          <div>
+                            <label className="label">서약자 본인 서명 <span className="text-red-500">*</span></label>
+                            <SignaturePad onChange={setPlSig} />
+                          </div>
+                          <button onClick={issueJoinPledge} disabled={plBusy || !plConfirm || !plSig || !plForm.jobType.trim()} className="btn-primary w-full text-xs">
+                            {plBusy ? '발급 중…' : '서약서 발급 후 계속'}
+                          </button>
+                        </div>
+                      )}
+
+                      {joinCand.pledgeOk && joinCand.undertakingStatus !== 'VALID' && (
+                        <div className="space-y-2 border-t border-amber-200 pt-2">
+                          <p className="text-xs font-bold text-slate-700">📄 업체 이행각서 명단 추가 재발급</p>
+                          <input className="input-base text-sm" placeholder="관리감독자명" value={utManager} onChange={(e) => setUtManager(e.target.value)} />
+                          <button onClick={reissueUndertaking} disabled={utBusy || !utManager.trim()} className="btn-primary w-full text-xs">
+                            {utBusy ? '재발급 중…' : '명단에 추가 재발급 후 계속'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {joinCand.docsOk && (
+                    <>
+                      <label className="flex items-start gap-2 text-sm text-slate-700">
+                        <input type="checkbox" className="mt-0.5" checked={joinBriefed} onChange={(e) => setJoinBriefed(e.target.checked)} />
+                        <span>이 작업의 <b>위험요인·안전대책을 설명받았습니까?</b> (설명 완료 확인)</span>
+                      </label>
+                      <div>
+                        <label className="label">합류자 본인 서명 <span className="text-red-500">*</span></label>
+                        <SignaturePad onChange={setJoinSig} />
+                      </div>
+                      <button onClick={submitJoin} disabled={joinBusy || !joinBriefed || !joinSig} className="btn-primary w-full text-sm">
+                        {joinBusy ? '등록 중…' : '합류 등록 (시각 기록)'}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
               {joinMsg && <p className="text-xs text-red-600">{joinMsg}</p>}

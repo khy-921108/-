@@ -133,7 +133,7 @@ export default function AdminWorkPermitDetailPage() {
   const info = data.info ?? {};
   const equipment: any[] = Array.isArray(data.equipment) ? data.equipment : [];
   const arrivals: any[] = Array.isArray(data.equipmentArrivals) ? data.equipmentArrivals : [];
-  const isHeavy = data.supplemental?.heavy === 'Y';
+  const isHeavy = data.supplemental?.heavy === 'Y' || data.supplemental?.excavation === 'Y'; // 장비 관련(중장비·굴착) 공통 조건
   const tbm = data.tbm ?? {};
   const comp = data.completion ?? {};
   const deptConfs: Record<string, any> = data.deptConfirmations ?? {};
@@ -306,7 +306,11 @@ export default function AdminWorkPermitDetailPage() {
             <span className="font-mono text-2xl sm:text-3xl font-extrabold tracking-tight text-brand whitespace-nowrap">{data.permitNumber}</span>
             <StageBadge stage={data.stage} />
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            {/* 현장 입회 중 합류자 추가·장비 도착 등록용 — 기존 TBM 화면 재사용(종료확인 후 숨김) */}
+            {!closed && (
+              <a href={`/work-permit/tbm/${id}`} target="_blank" rel="noreferrer" className="rounded-xl bg-emerald-600 text-white text-sm font-bold px-4 py-2 hover:bg-emerald-700">🦺 현장 TBM 화면 열기</a>
+            )}
             <a href={`/work-permit/print/${id}`} target="_blank" rel="noreferrer" className="btn-secondary text-sm">🖨 인쇄</a>
             <a href={`/api/work-permits/${id}/xlsx`} className="btn-secondary text-sm">📥 회사양식 xlsx</a>
           </div>
@@ -350,7 +354,7 @@ export default function AdminWorkPermitDetailPage() {
             ['TBM 제출', tbm.tbmSubmittedAt],
             ['2차 입회', tbm.witness?.at],
             ['작업 개시', data.startedAt],
-            [`현장 합류 ${data.fieldJoinCount ?? 0}건`, null],
+            [`현장 합류 ${data.fieldJoinCount ?? 0}건`, data.lastFieldJoinAt ?? null],
             [`장비 도착 ${arrivals.length}건`, arrivals.length > 0 ? arrivals[arrivals.length - 1].at : null],
             ['종료 신고', comp.reportAt],
             ['종료 확인', comp.confirmAt],

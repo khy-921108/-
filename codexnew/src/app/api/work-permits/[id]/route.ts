@@ -230,6 +230,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
         };
       }),
       fieldJoinCount: fieldJoinsRaw.length,
+      lastFieldJoinAt: fieldJoinsRaw.length > 0 ? fieldJoinsRaw[fieldJoinsRaw.length - 1]?.joinedAt ?? null : null,
       equipmentArrivals, // [{type, vehicleNumber, at, photoUrl}]
       note: permit.note,
       createdAt: permit.created_at,
