@@ -51,7 +51,7 @@ export async function POST(req: Request) {
       .select(
         `id, permit_number, work_name, work_start, work_end, request_company_name, supplemental,
          status, created_at, issuer_signature, started_at, completion, dept_confirmations,
-         work_location, equipment_no, work_content, applicant_title, request_company_id, tbm`
+         work_location, equipment_no, work_content, applicant_title, request_company_id, tbm, equipment_arrivals`
       )
       .eq('applicant_name', name)
       .eq('applicant_birth_date', birthDate)
@@ -82,6 +82,7 @@ export async function POST(req: Request) {
       stage: stageFromRow(p, nowMs), // R-6 진행단계(업체 카드 = 전체 단계 필요 → full stage)
       createdAt: p.created_at,
       issued: !!(p.issuer_signature && String(p.issuer_signature).startsWith('data:image/')), // 1차 승인 여부
+      arrivalsCount: Array.isArray(p.equipment_arrivals) ? p.equipment_arrivals.length : 0,
       // 복사 재신청용 원본 내용(본인확인 통과자 본인 것만). 날짜·서명·참여자·TBM 확인은 제외.
       copy: {
         companyId: p.request_company_id ?? null,

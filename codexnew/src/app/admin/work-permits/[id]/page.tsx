@@ -132,6 +132,8 @@ export default function AdminWorkPermitDetailPage() {
 
   const info = data.info ?? {};
   const equipment: any[] = Array.isArray(data.equipment) ? data.equipment : [];
+  const arrivals: any[] = Array.isArray(data.equipmentArrivals) ? data.equipmentArrivals : [];
+  const isHeavy = data.supplemental?.heavy === 'Y';
   const tbm = data.tbm ?? {};
   const comp = data.completion ?? {};
   const deptConfs: Record<string, any> = data.deptConfirmations ?? {};
@@ -339,20 +341,71 @@ export default function AdminWorkPermitDetailPage() {
         <Row k="신청일시" v={fmtDateTime(data.createdAt)} />
       </section>
 
+      {/* 진행 타임라인 */}
+      <section className="card text-sm">
+        <h2 className="font-bold text-slate-700 mb-2">🕒 진행 타임라인</h2>
+        <ul className="space-y-1 text-xs">
+          {([
+            ['1차 발급', data.issuer?.at],
+            ['TBM 제출', tbm.tbmSubmittedAt],
+            ['2차 입회', tbm.witness?.at],
+            ['작업 개시', data.startedAt],
+            [`현장 합류 ${data.fieldJoinCount ?? 0}건`, null],
+            [`장비 도착 ${arrivals.length}건`, arrivals.length > 0 ? arrivals[arrivals.length - 1].at : null],
+            ['종료 신고', comp.reportAt],
+            ['종료 확인', comp.confirmAt],
+          ] as [string, string | null][]).map(([label, at], i) => {
+            const isCount = label.includes('건');
+            const done = isCount ? !label.startsWith('현장 합류 0') && !label.startsWith('장비 도착 0') : !!at;
+            return (
+              <li key={i} className="flex items-center gap-2">
+                <span className={done ? 'text-emerald-600' : 'text-slate-300'}>{done ? '●' : '○'}</span>
+                <span className={done ? 'text-slate-800 font-medium' : 'text-slate-400'}>{label}</span>
+                {at && <span className="text-slate-400">· {fmtDateTime(at)}</span>}
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
       {/* 장비 정보 (중장비·굴착) */}
-      {equipment.length > 0 && (
-        <section className="card text-sm">
-          <h2 className="font-bold text-slate-700 mb-2">🚜 장비 정보 ({equipment.length})</h2>
+      {(equipment.length > 0 || isHeavy || arrivals.length > 0) && (
+        <section className="card text-sm space-y-2">
+          <div className="flex items-center justify-between">
+            <h2 className="font-bold text-slate-700">🚜 장비 정보 ({equipment.length})</h2>
+            {isHeavy && arrivals.length === 0 && (
+              <span className="rounded-full bg-amber-100 text-amber-800 text-xs font-bold px-2 py-0.5">⚠ 장비 미등록</span>
+            )}
+          </div>
+          {equipment.length > 0 && (
           <ul className="divide-y divide-slate-100">
             {equipment.map((eq, i) => (
               <li key={i} className="py-1.5 flex items-center justify-between gap-2">
-                <span className="text-slate-800"><b>{eq.type || '장비'}</b>{eq.vehicleNumber ? ` · ${eq.vehicleNumber}` : ''}</span>
+                <span className="text-slate-800"><b>{eq.type || '장비'}</b>{eq.vehicleNumber ? ` · ${eq.vehicleNumber}` : ' · 차량번호 현장 확인'}</span>
                 {eq.vehicleNumber && (eq.matched
                   ? <span className="text-xs font-bold text-emerald-700 whitespace-nowrap shrink-0">✅ 교육차량 일치</span>
                   : <span className="text-xs font-bold text-red-600 whitespace-nowrap shrink-0">⚠ 차량번호 불일치 — 현장 확인 요망</span>)}
               </li>
             ))}
           </ul>
+          )}
+          {/* 장비 도착 기록(사진·시각) */}
+          {arrivals.length > 0 && (
+            <div>
+              <p className="text-slate-400 text-xs mb-1">장비 도착 기록 ({arrivals.length})</p>
+              <div className="flex gap-2 flex-wrap">
+                {arrivals.map((a: any, i: number) => (
+                  <div key={i} className="border border-slate-200 rounded p-1.5 w-36">
+                    {a.photoUrl
+                      ? <img src={a.photoUrl} alt={`장비 ${i + 1}`} onClick={() => setLightbox(a.photoUrl)} className="w-full h-20 object-cover rounded cursor-zoom-in hover:opacity-80" />
+                      : <div className="w-full h-20 bg-slate-100 rounded flex items-center justify-center text-[10px] text-slate-400">사진 없음</div>}
+                    <p className="text-[11px] text-slate-700 font-medium mt-1 truncate">{a.type}{a.vehicleNumber ? ` · ${a.vehicleNumber}` : ''}</p>
+                    <p className="text-[10px] text-slate-400">도착 {fmtDateTime(a.at)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       )}
 
@@ -378,7 +431,12 @@ export default function AdminWorkPermitDetailPage() {
               const plOk = pledgeSigByName.get(nm) === true;
               return (
                 <tr key={i} className="border-b border-slate-50">
-                  <td className="py-1.5 font-medium text-slate-800">{p.name}</td>
+                  <td className="py-1.5 font-medium text-slate-800">
+                    {p.name}
+                    {p.fieldJoinedAt && (
+                      <span className="ml-1 rounded bg-sky-100 text-sky-700 text-[10px] font-bold px-1.5 py-0.5 whitespace-nowrap">현장 합류 {fmtDateTime(p.fieldJoinedAt).slice(-5)}</span>
+                    )}
+                  </td>
                   <td className="text-slate-500">{p.companyName}</td>
                   <td className="text-center"><TriCell done={tbmOk} started={tbmStarted} /></td>
                   <td className="text-center"><TriCell done={plOk} started={tbmStarted} /></td>
@@ -550,7 +608,12 @@ export default function AdminWorkPermitDetailPage() {
       <section className="card">
         <h2 className="font-bold text-slate-700 mb-1">작업완료 (종료 신고 → 확인)</h2>
         <SigRow label="종료 신고" sub="작업자/소장(대리입력)" signature={comp.workerSignature} who={slabel(comp.reportBy)} at={comp.reportAt}
-          action={hasApprove && !closed ? btn(reportDone ? '재신고' : '종료 신고', () => { if (reportDone && !confirm('종료신고를 다시 하면 덮어씁니다.')) return; openModal({ type: 'report' }); }) : null} />
+          action={hasApprove && !closed ? btn(reportDone ? '재신고' : '종료 신고', () => {
+            if (reportDone && !confirm('종료신고를 다시 하면 덮어씁니다.')) return;
+            // 중장비인데 장비 도착 등록 0건 → 확인 문구만(차단 없음)
+            if (isHeavy && arrivals.length === 0 && !confirm('장비 도착 등록 없이 종료합니다(크레인 미사용 등). 계속하시겠습니까?')) return;
+            openModal({ type: 'report' });
+          }) : null} />
         <SigRow label="종료 확인" sub="안전환경 최종" signature={comp.confirmSignature} who={slabel(comp.confirmBy)} at={comp.confirmAt}
           action={hasApprove && !closed ? (
             reportDone

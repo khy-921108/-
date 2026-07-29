@@ -55,6 +55,25 @@ export default function SiteTbmPage() {
   const [signFor, setSignFor] = useState<string | null>(null);
   const [sig, setSig] = useState('');
 
+  // 현장 합류자 추가
+  const [joinOpen, setJoinOpen] = useState(false);
+  const [joinForm, setJoinForm] = useState({ name: '', birthDate: '', phone: '' });
+  const [joinCand, setJoinCand] = useState<any>(null);       // 수료 확인 결과(유효)
+  const [joinBlocked, setJoinBlocked] = useState('');        // 수료 없음/만료 메시지
+  const [joinBriefed, setJoinBriefed] = useState(false);
+  const [joinSig, setJoinSig] = useState('');
+  const [joinBusy, setJoinBusy] = useState(false);
+  const [joinMsg, setJoinMsg] = useState('');
+
+  // 장비 도착 등록
+  const arrFileRef = useRef<HTMLInputElement>(null);
+  const [arrOpen, setArrOpen] = useState(false);
+  const [arrType, setArrType] = useState('');
+  const [arrVehicle, setArrVehicle] = useState('');
+  const [arrPhoto, setArrPhoto] = useState('');
+  const [arrBusy, setArrBusy] = useState(false);
+  const [arrMsg, setArrMsg] = useState('');
+
   const call = useCallback(async (c: Cred, extra: any) => {
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), 20000); // 무한 대기 방지
@@ -123,6 +142,64 @@ export default function SiteTbmPage() {
     if (!json.success) { setBusy(false); setError(json.message || '제출 실패'); return; }
     await loadSession(cred); // tbmSubmitted 플래그 갱신(제출 후에도 화면 유지, 사진·서명 추가는 2차 전까지 가능)
     setBusy(false);
+  };
+
+  // 합류자 1단계: 수료 확인
+  const checkJoin = async () => {
+    if (!cred) return;
+    setJoinMsg(''); setJoinBlocked(''); setJoinCand(null);
+    if (!joinForm.name.trim() || !joinForm.birthDate || joinForm.phone.length < 10) {
+      setJoinMsg('이름·생년월일·연락처를 정확히 입력해 주세요.'); return;
+    }
+    setJoinBusy(true);
+    const json = await call(cred, {
+      action: 'join', checkOnly: true,
+      joinName: joinForm.name.trim(), joinBirthDate: joinForm.birthDate, joinPhone: joinForm.phone,
+    });
+    setJoinBusy(false);
+    if (!json.success) {
+      if (json.code === 'NOT_ELIGIBLE') setJoinBlocked(json.message || '안전교육을 먼저 받아야 합니다.');
+      else setJoinMsg(json.message || '확인 실패');
+      return;
+    }
+    setJoinCand(json.data); setJoinBriefed(false); setJoinSig('');
+  };
+
+  // 합류자 2단계: 설명 확인 + 서명 → 등록
+  const submitJoin = async () => {
+    if (!cred || !joinCand) return;
+    if (!joinBriefed) { setJoinMsg('위험요인·안전대책 설명 확인에 체크해 주세요.'); return; }
+    if (!joinSig) { setJoinMsg('합류자 서명을 입력해 주세요.'); return; }
+    setJoinBusy(true); setJoinMsg('');
+    const json = await call(cred, {
+      action: 'join',
+      joinName: joinForm.name.trim(), joinBirthDate: joinForm.birthDate, joinPhone: joinForm.phone,
+      briefed: true, signature: joinSig,
+    });
+    setJoinBusy(false);
+    if (!json.success) { setJoinMsg(json.message || '합류 등록 실패'); return; }
+    setJoinOpen(false); setJoinForm({ name: '', birthDate: '', phone: '' }); setJoinCand(null); setJoinSig('');
+    await loadSession(cred);
+  };
+
+  const addArrivalPhoto = async (files: FileList | null) => {
+    if (!files || !files[0]) return;
+    try { setArrPhoto(await resizeToDataUrl(files[0])); setArrMsg(''); } catch { setArrMsg('사진 처리 실패'); }
+    finally { if (arrFileRef.current) arrFileRef.current.value = ''; }
+  };
+
+  const submitArrival = async () => {
+    if (!cred) return;
+    if (!arrType.trim()) { setArrMsg('장비 종류를 입력해 주세요.'); return; }
+    if (!arrPhoto) { setArrMsg('장비 사진을 촬영해 주세요(필수).'); return; }
+    setArrBusy(true); setArrMsg('');
+    const json = await call(cred, {
+      action: 'arrival', equipType: arrType.trim(), vehicleNumber: arrVehicle.trim(), image: arrPhoto,
+    });
+    setArrBusy(false);
+    if (!json.success) { setArrMsg(json.message || '등록 실패'); return; }
+    setArrType(''); setArrVehicle(''); setArrPhoto('');
+    await loadSession(cred);
   };
 
   // ── 본인확인 폼 ──
@@ -235,6 +312,96 @@ export default function SiteTbmPage() {
           {data.tbmSubmitted && <p className="text-[11px] text-slate-400 text-center">제출 후에도 2차 확인 전까지 사진·서명을 추가할 수 있습니다.</p>}
         </section>
       )}
+
+      {/* 현장 합류자 추가 — 개시 후에도 가능, 종료신고 후 불가 */}
+      {!data.reported && !data.closed && (
+        <section className="card space-y-2">
+          <div className="flex items-center justify-between">
+            <h2 className="font-bold text-slate-700">👷 현장 합류자 {data.joinCount > 0 && <span className="text-xs font-normal text-slate-400">(합류 {data.joinCount}명)</span>}</h2>
+            {!joinOpen && <button onClick={() => setJoinOpen(true)} className="btn-primary text-xs px-3 py-1.5">+ 현장 합류자 추가</button>}
+          </div>
+          {joinOpen && (
+            <div className="space-y-2 pt-1">
+              <div className="grid grid-cols-1 gap-2">
+                <input className="input-base text-sm" placeholder="이름" value={joinForm.name}
+                  onChange={(e) => setJoinForm({ ...joinForm, name: e.target.value })} />
+                <input type="date" className="input-base text-sm" value={joinForm.birthDate}
+                  onChange={(e) => setJoinForm({ ...joinForm, birthDate: e.target.value })} aria-label="생년월일" />
+                <input type="tel" inputMode="numeric" className="input-base text-sm" placeholder="연락처(숫자만)" value={joinForm.phone}
+                  onChange={(e) => setJoinForm({ ...joinForm, phone: e.target.value.replace(/[^0-9]/g, '').slice(0, 11) })} />
+              </div>
+              {!joinCand && !joinBlocked && (
+                <button onClick={checkJoin} disabled={joinBusy} className="btn-secondary w-full text-sm">{joinBusy ? '확인 중…' : '교육 수료 확인'}</button>
+              )}
+              {joinBlocked && (
+                <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 space-y-1">
+                  <p>⛔ {joinBlocked}</p>
+                  <a href="/consent" target="_blank" rel="noreferrer" className="inline-block text-xs font-bold underline">→ 안전교육 시작하기</a>
+                </div>
+              )}
+              {joinCand && (
+                <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 space-y-2">
+                  <p className="text-sm text-emerald-800 font-bold">✅ 교육 유효 — {joinCand.name} ({joinCand.companyName ?? '소속 미상'}{joinCand.targetLabel ? ` · ${joinCand.targetLabel}` : ''})</p>
+                  <label className="flex items-start gap-2 text-sm text-slate-700">
+                    <input type="checkbox" className="mt-0.5" checked={joinBriefed} onChange={(e) => setJoinBriefed(e.target.checked)} />
+                    <span>이 작업의 <b>위험요인·안전대책을 설명받았습니까?</b> (설명 완료 확인)</span>
+                  </label>
+                  <div>
+                    <label className="label">합류자 본인 서명 <span className="text-red-500">*</span></label>
+                    <SignaturePad onChange={setJoinSig} />
+                  </div>
+                  <button onClick={submitJoin} disabled={joinBusy || !joinBriefed || !joinSig} className="btn-primary w-full text-sm">
+                    {joinBusy ? '등록 중…' : '합류 등록 (시각 기록)'}
+                  </button>
+                </div>
+              )}
+              {joinMsg && <p className="text-xs text-red-600">{joinMsg}</p>}
+              <button onClick={() => { setJoinOpen(false); setJoinCand(null); setJoinBlocked(''); setJoinMsg(''); }} className="text-xs text-slate-400 underline">닫기</button>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* 장비 도착 등록 — 중장비·굴착 허가서에만, 종료확인 후 불가 */}
+      {data.heavyOrExcav && !data.closed && (
+        <section className="card space-y-2">
+          <div className="flex items-center justify-between">
+            <h2 className="font-bold text-slate-700">🚜 장비 도착 <span className="text-xs font-normal text-slate-400">({(data.arrivals ?? []).length}건)</span></h2>
+            {!arrOpen && <button onClick={() => setArrOpen(true)} className="btn-primary text-xs px-3 py-1.5">장비 도착 등록</button>}
+          </div>
+          {(data.arrivals ?? []).length > 0 && (
+            <ul className="text-xs text-slate-600 space-y-0.5">
+              {(data.arrivals ?? []).map((a: any, i: number) => (
+                <li key={i}>✅ {a.type}{a.vehicleNumber ? ` · ${a.vehicleNumber}` : ''} · 도착 {a.at ? new Date(new Date(a.at).getTime() + 9 * 3600 * 1000).toISOString().substring(11, 16) : ''}</li>
+              ))}
+            </ul>
+          )}
+          {arrOpen && (
+            <div className="space-y-2 pt-1">
+              <div className="grid grid-cols-2 gap-2">
+                <input className="input-base text-sm" placeholder="장비 종류 * (예: 크레인)" value={arrType} onChange={(e) => setArrType(e.target.value)} />
+                <input className="input-base text-sm" placeholder="차량번호 (선택)" value={arrVehicle} onChange={(e) => setArrVehicle(e.target.value)} />
+              </div>
+              <input ref={arrFileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => addArrivalPhoto(e.target.files)} />
+              {arrPhoto
+                ? <img src={arrPhoto} alt="장비 사진" className="w-32 h-20 object-cover rounded border border-slate-200" />
+                : null}
+              <button onClick={() => arrFileRef.current?.click()} className="btn-secondary w-full text-sm">📷 장비 사진 촬영 (필수)</button>
+              {arrMsg && <p className="text-xs text-red-600">{arrMsg}</p>}
+              <div className="flex gap-2">
+                <button onClick={() => { setArrOpen(false); setArrMsg(''); }} className="btn-secondary flex-1 text-sm">닫기</button>
+                <button onClick={submitArrival} disabled={arrBusy || !arrType.trim() || !arrPhoto} className="btn-primary flex-1 text-sm">
+                  {arrBusy ? '등록 중…' : '+ 도착 등록 (시각 기록)'}
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      <p className="text-[11px] text-slate-400 text-center">
+        ※ 계획에 없던 위험작업(중장비 등)을 추가해야 하면 새 허가서를 신청하거나 관리자에게 되돌리기를 요청하세요.
+      </p>
 
       {/* 서명 모달 */}
       {signFor && (

@@ -48,10 +48,19 @@ export default function WorkPermitEquipment() {
       setError('중장비 작업에는 중장비 교육을 수료한 기사가 1명 이상 필요합니다. 참여자 단계에서 추가해 주세요.');
       return;
     }
-    const equipment: WpEquipment[] = rows
-      .map((r) => ({ type: r.type.trim(), vehicleNumber: r.vehicleNumber.trim() }))
-      .filter((r) => r.type || r.vehicleNumber)
+    // 종류는 필수, 차량번호는 선택(비우면 현장 확인 — 도착 시 사진 등록)
+    const cleaned = rows.map((r) => ({ type: r.type.trim(), vehicleNumber: r.vehicleNumber.trim() }));
+    if (cleaned.some((r) => r.vehicleNumber && !r.type)) {
+      setError('장비 종류를 입력해 주세요(차량번호만으로는 등록할 수 없습니다).');
+      return;
+    }
+    const equipment: WpEquipment[] = cleaned
+      .filter((r) => r.type)
       .map((r) => ({ type: r.type, vehicleNumber: r.vehicleNumber, matched: isMatched(r.vehicleNumber) }));
+    if (heavyChecked && equipment.length === 0) {
+      setError('중장비 작업은 장비 종류를 1개 이상 입력해 주세요.');
+      return;
+    }
     writeDraft({ equipment });
     router.push('/work-permit/docs');
   };
@@ -94,11 +103,11 @@ export default function WorkPermitEquipment() {
             <div key={i} className="card space-y-2">
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <label className="label">종류</label>
+                  <label className="label">종류 *</label>
                   <input className="input-base" value={r.type} onChange={(e) => setRow(i, 'type', e.target.value)} placeholder="예: 굴착기·지게차·크레인" />
                 </div>
                 <div className="flex-1">
-                  <label className="label">차량/장비 번호</label>
+                  <label className="label">차량/장비 번호 (선택)</label>
                   <input className="input-base" value={r.vehicleNumber} onChange={(e) => setRow(i, 'vehicleNumber', e.target.value)} placeholder="예: 12가3456" />
                 </div>
               </div>
@@ -107,7 +116,7 @@ export default function WorkPermitEquipment() {
                   matched
                     ? <span className="text-xs font-bold text-emerald-700">✅ 교육 등록 차량과 일치</span>
                     : <span className="text-xs font-bold text-amber-700">⚠ 교육 등록 차량과 불일치 (신청은 가능 · 현장 확인)</span>
-                ) : <span className="text-xs text-slate-400">차량번호 입력 시 자동 대조</span>}
+                ) : <span className="text-xs text-slate-400">차량번호를 모르면 비워두세요 — 현장 도착 시 사진으로 등록합니다</span>}
                 {rows.length > 1 && <button type="button" onClick={() => removeRow(i)} className="text-xs text-red-600 hover:underline">삭제</button>}
               </div>
             </div>

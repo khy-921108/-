@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { normalizePhone } from '@/lib/equipment';
+import { evaluateParticipant } from '@/lib/participant-eligibility';
 import { sendSms } from '@/lib/sms';
 import { isValidSignature, isValidPhoto, MAX_PHOTO_BYTES } from '@/lib/upload-validate';
 
@@ -53,7 +54,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   const { data: permit, error } = await withTimeout(
     supabase
       .from('work_permits')
-      .select('id, permit_number, work_name, status, applicant_name, applicant_birth_date, applicant_phone, issuer_signature, tbm, started_at, work_end')
+      .select('id, permit_number, work_name, status, applicant_name, applicant_birth_date, applicant_phone, issuer_signature, tbm, started_at, work_end, completion, supplemental, field_joins, equipment_arrivals, request_company_name')
       .eq('id', permitId)
       .maybeSingle(),
     'select'
@@ -98,6 +99,12 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     return { name: p.name, companyName: p.company_name, confirmed: !!confirmations[key]?.signature };
   });
 
+  const compTbm = (permit.completion ?? {}) as Record<string, any>;
+  const isSigStr = (s: any) => !!(s && String(s).startsWith('data:image/'));
+  const suppTbm = (permit.supplemental ?? {}) as Record<string, string>;
+  const arrivals: any[] = Array.isArray(permit.equipment_arrivals) ? permit.equipment_arrivals : [];
+  const fieldJoins: any[] = Array.isArray(permit.field_joins) ? permit.field_joins : [];
+
   // ── session: 상태만 반환 ──
   if (action === 'session') {
     return NextResponse.json({
@@ -112,6 +119,12 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
         roster,
         tbmSubmitted: !!tbm.tbmSubmittedAt, // 제출 완료 여부
         witnessConfirmed: !!(tbm.witness?.signature && String(tbm.witness.signature).startsWith('data:image/')), // 2차 입회 완료
+        started: !!permit.started_at,
+        reported: isSigStr(compTbm.workerSignature),   // 종료신고 완료(합류자 추가 불가)
+        closed: isSigStr(compTbm.confirmSignature),    // 종료확인 완료(장비 도착 등록 불가)
+        heavyOrExcav: suppTbm.heavy === 'Y' || suppTbm.excavation === 'Y', // 장비 도착 버튼 표시 여부
+        arrivals: arrivals.map((a: any) => ({ type: a.type, vehicleNumber: a.vehicleNumber ?? '', at: a.at })),
+        joinCount: fieldJoins.length,
       },
     });
   }
@@ -207,6 +220,127 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
       }
     }
     return NextResponse.json({ success: true, data: { submitted: true, resent: false } });
+  }
+
+  // ── join: 현장 합류자 추가 (append 전용 — 개시 후에도 가능, 종료신고 후 불가) ──
+  //  기존 기록 수정·삭제 잠금과 별개: 참여자·서명·합류기록을 "추가"만 한다.
+  if (action === 'join') {
+    if (isSigStr(compTbm.workerSignature) || isSigStr(compTbm.confirmSignature)) {
+      return NextResponse.json({ success: false, code: 'ALREADY_REPORTED', message: '종료신고 이후에는 합류자를 추가할 수 없습니다.' }, { status: 409 });
+    }
+    const jName = (body?.joinName ?? '').toString().trim();
+    const jBirth = (body?.joinBirthDate ?? '').toString().trim();
+    const jPhone = (body?.joinPhone ?? '').toString().replace(/[^0-9]/g, '');
+    const jSig = (body?.signature ?? '').toString();
+    if (!jName || !jBirth || jPhone.length < 10) {
+      return NextResponse.json({ success: false, code: 'INVALID_INPUT', message: '합류자의 이름·생년월일·연락처를 정확히 입력해 주세요.' }, { status: 400 });
+    }
+    // 이미 참여자인지(이름+정규화 전화) 확인
+    const jNorm = normalizePhone(jPhone);
+    const dup = (parts ?? []).some((p: any) => (p.name ?? '').trim() === jName && normalizePhone(p.phone) === jNorm);
+    if (dup) {
+      return NextResponse.json({ success: false, code: 'ALREADY_PARTICIPANT', message: '이미 참여자 명단에 있는 사람입니다.' }, { status: 409 });
+    }
+    // 교육 수료 확인(기존 판정 재사용 — 작업 종료일 기준)
+    const elig = await withTimeout(evaluateParticipant(supabase, { name: jName, birthDate: jBirth, phone: jPhone }, permit.work_end), 'eligibility');
+    if (elig.status !== 'VALID') {
+      return NextResponse.json(
+        { success: false, code: 'NOT_ELIGIBLE', message: '안전교육을 먼저 받아야 합니다. (수료 없음 또는 작업일 기준 만료)' },
+        { status: 403 }
+      );
+    }
+    // 1단계(확인만): 수료·소속 정보 반환하고 저장하지 않음 — 화면에서 설명확인+서명 후 재호출
+    if (body?.checkOnly === true) {
+      return NextResponse.json({
+        success: true,
+        data: { eligible: true, name: jName, companyName: elig.companyName, targetLabel: elig.targetLabel, expiresAt: elig.expiresAt },
+      });
+    }
+    if (body?.briefed !== true) {
+      return NextResponse.json({ success: false, code: 'NOT_BRIEFED', message: '위험요인·안전대책 설명 확인이 필요합니다.' }, { status: 400 });
+    }
+    if (!isValidSignature(jSig)) {
+      return NextResponse.json({ success: false, code: 'NO_SIGNATURE', message: '합류자 서명이 필요합니다(PNG).' }, { status: 400 });
+    }
+    const now = new Date().toISOString();
+    // 1) 참여자 추가(소속·장비정보 자동) — 전원 서명 판정·출력에 자동 포함
+    const maxSort = (parts ?? []).length;
+    const { error: insErr } = await withTimeout(
+      supabase.from('work_permit_participants').insert({
+        work_permit_id: permitId,
+        name: jName,
+        phone: jPhone,
+        company_name: elig.companyName ?? permit.request_company_name,
+        target_type: elig.targetCode,
+        vehicle_number: elig.vehicleNumber,
+        equipment_type: elig.equipmentType,
+        spec: elig.spec,
+        completed_at: elig.completedAt,
+        expires_at: elig.expiresAt,
+        sort_order: maxSort + 1,
+      }),
+      'join-insert'
+    );
+    if (insErr) {
+      console.error('[tbm join] participant insert:', insErr);
+      return NextResponse.json({ success: false, code: 'SAVE_FAILED', message: '합류자 저장 실패' }, { status: 500 });
+    }
+    // 2) 추가 TBM 서명(돌려서명과 동일 키) + 3) 합류 기록 append(시각)
+    const key = `${jName}||${jNorm}`;
+    const nextConfs = { ...confirmations, [key]: { name: jName, signature: jSig, confirmedAt: now } };
+    const nextJoins = [...fieldJoins, { name: jName, phone: jNorm, companyName: elig.companyName ?? permit.request_company_name, targetLabel: elig.targetLabel, joinedAt: now }];
+    const { error: jErr } = await withTimeout(
+      supabase.from('work_permits').update({ tbm: { ...tbm, confirmations: nextConfs }, field_joins: nextJoins }).eq('id', permitId),
+      'join-save'
+    );
+    if (jErr) {
+      console.error('[tbm join] save:', jErr);
+      return NextResponse.json({ success: false, code: 'SAVE_FAILED', message: '합류 기록 저장 실패' }, { status: 500 });
+    }
+    return NextResponse.json({ success: true, data: { joined: true, name: jName, joinedAt: now, companyName: elig.companyName } });
+  }
+
+  // ── arrival: 장비 도착 등록 (사진 필수 — 개시 후에도 가능, 종료확인 후 불가) ──
+  if (action === 'arrival') {
+    if (isSigStr(compTbm.confirmSignature)) {
+      return NextResponse.json({ success: false, code: 'ALREADY_CLOSED', message: '종료확인 이후에는 장비 도착을 등록할 수 없습니다.' }, { status: 409 });
+    }
+    const aType = (body?.equipType ?? '').toString().trim();
+    const aVehicle = (body?.vehicleNumber ?? '').toString().trim();
+    const image = (body?.image ?? '').toString();
+    if (!aType) {
+      return NextResponse.json({ success: false, code: 'NO_TYPE', message: '장비 종류를 입력해 주세요.' }, { status: 400 });
+    }
+    if (!isValidPhoto(image)) {
+      return NextResponse.json({ success: false, code: 'BAD_IMAGE', message: '장비 사진이 필요합니다(PNG·JPG·WEBP만 허용).' }, { status: 400 });
+    }
+    const m = image.match(/^data:image\/(png|jpe?g|webp);base64,(.+)$/)!;
+    const mime = m[1] === 'jpg' ? 'jpeg' : m[1];
+    const buf = Buffer.from(m[2], 'base64');
+    if (buf.length > MAX_PHOTO_BYTES) {
+      return NextResponse.json({ success: false, code: 'TOO_LARGE', message: '사진 용량이 큽니다(5MB 이하).' }, { status: 413 });
+    }
+    const ext = mime === 'jpeg' ? 'jpg' : mime;
+    const key = `permits/${permitId}/arrival-${Date.now()}.${ext}`;
+    const { error: upErr } = await withTimeout(
+      supabase.storage.from('work-permit-photos').upload(key, buf, { contentType: `image/${mime}`, upsert: true }),
+      'arrival-upload'
+    );
+    if (upErr) {
+      console.error('[tbm arrival] upload:', upErr);
+      return NextResponse.json({ success: false, code: 'UPLOAD_FAILED', message: '사진 업로드 실패' }, { status: 500 });
+    }
+    const now = new Date().toISOString();
+    const nextArrivals = [...arrivals, { type: aType, vehicleNumber: aVehicle || null, photo: key, at: now }];
+    const { error: aErr } = await withTimeout(
+      supabase.from('work_permits').update({ equipment_arrivals: nextArrivals }).eq('id', permitId),
+      'arrival-save'
+    );
+    if (aErr) {
+      console.error('[tbm arrival] save:', aErr);
+      return NextResponse.json({ success: false, code: 'SAVE_FAILED', message: '도착 기록 저장 실패' }, { status: 500 });
+    }
+    return NextResponse.json({ success: true, data: { arrived: true, at: now, count: nextArrivals.length } });
   }
 
   return NextResponse.json({ success: false, code: 'BAD_ACTION', message: '알 수 없는 동작입니다.' }, { status: 400 });

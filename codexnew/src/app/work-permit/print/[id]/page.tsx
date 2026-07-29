@@ -163,7 +163,12 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
         <table className="t small"><tbody>
           <tr><th style={{ width: 30 }}>No</th><th>성명</th><th>소속</th><th style={{ width: '40%' }}>확인 서명</th></tr>
           {parts.map((pp: any, i: number) => (
-            <tr key={i}><td className="c">{i + 1}</td><td>{pp.name}</td><td>{pp.companyName}</td><td><SigCell sig={pp.tbmSignature} name={pp.name} at={pp.tbmConfirmedAt} /></td></tr>
+            <tr key={i}>
+              <td className="c">{i + 1}</td>
+              <td>{pp.name}{pp.fieldJoinedAt ? <span className="muted"> (합류 {fmtDateTime(pp.fieldJoinedAt).slice(-5)})</span> : null}</td>
+              <td>{pp.companyName}</td>
+              <td><SigCell sig={pp.tbmSignature} name={pp.name} at={pp.tbmConfirmedAt} /></td>
+            </tr>
           ))}
         </tbody></table>
       </section>
@@ -176,6 +181,24 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
             // eslint-disable-next-line @next/next/no-img-element
             <img key={i} src={u} alt={`현장사진 ${i + 1}`} className="photo" />))}</div>
         ) : (<p className="muted" style={{ textAlign: 'center', padding: '30px 0' }}>현장 사진 없음 — 회사양식 출력본에 현장 부착</p>)}
+
+        {/* 장비 도착 기록(사진·시각) — 현장 등록분 */}
+        {Array.isArray(data.equipmentArrivals) && data.equipmentArrivals.length > 0 && (
+          <>
+            <div className="sec">장비 도착 기록 ({data.equipmentArrivals.length})</div>
+            <div className="photos">
+              {data.equipmentArrivals.map((a: any, i: number) => (
+                <div key={i} style={{ textAlign: 'center' }}>
+                  {a.photoUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={a.photoUrl} alt={`장비 ${i + 1}`} className="photo" />
+                  )}
+                  <p className="muted" style={{ fontSize: 11 }}>{a.type}{a.vehicleNumber ? ` · ${a.vehicleNumber}` : ''} · 도착 {fmtDateTime(a.at)}</p>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </section>
 
       {/* ③ 마스터 */}

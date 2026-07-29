@@ -103,6 +103,10 @@ export interface PermitDocData {
   note?: string | null;
   /** 중장비·굴착 장비(종류·차량번호·교육차량 대조결과) */
   equipment?: { type: string; vehicleNumber: string; matched?: boolean }[];
+  /** 현장 합류자(이름·합류시각 HH:MM) — 기타 특별사항에 표기 */
+  fieldJoins?: { name: string; joinedAt: string }[];
+  /** 장비 도착 기록(종류·차량번호·도착시각 HH:MM) — 기타 특별사항에 표기(사진은 print에서) */
+  equipmentArrivals?: { type: string; vehicleNumber: string | null; at: string }[];
   createdAt: string; // ISO
   docs?: DocsOutput; // 1C-2 필수문서(있으면 시트 8 N장·9·7 채움)
   // ===== R-6: 디지털 서명 / 승인 / TBM 상세 / QR (없으면 공란) =====
@@ -759,6 +763,20 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
     etcParts.push('장비: ' + eqList.map((e) =>
       `${e.type || '장비'}${e.vehicleNumber ? ` ${e.vehicleNumber}` : ''}${e.vehicleNumber && e.matched === false ? '(교육차량 불일치)' : ''}`
     ).join(', '));
+  }
+  // 현장 합류자·장비 도착(append 기록 — 합류/도착 시각 KST HH:MM)
+  const hhmm = (iso: string) => {
+    const k = new Date(new Date(iso).getTime() + 9 * 3600 * 1000);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${p(k.getUTCHours())}:${p(k.getUTCMinutes())}`;
+  };
+  const joins = Array.isArray(data.fieldJoins) ? data.fieldJoins : [];
+  if (joins.length > 0) {
+    etcParts.push('현장 합류: ' + joins.map((j) => `${j.name}(${hhmm(j.joinedAt)})`).join(', '));
+  }
+  const arrs = Array.isArray(data.equipmentArrivals) ? data.equipmentArrivals : [];
+  if (arrs.length > 0) {
+    etcParts.push('장비 도착: ' + arrs.map((a) => `${a.type}${a.vehicleNumber ? ` ${a.vehicleNumber}` : ''}(${hhmm(a.at)})`).join(', '));
   }
   if (etcParts.length > 0) {
     setCell(gs, G.etc, etcParts.join(' / '), true);

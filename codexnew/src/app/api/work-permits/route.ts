@@ -172,15 +172,24 @@ export async function POST(req: Request) {
     // 장비 스냅샷 — 차량번호 대조는 서버가 재계산(클라 matched 불신).
     const normPlate = (s: any) => (typeof s === 'string' ? s.replace(/[\s-]/g, '').toUpperCase() : '');
     const heavyPlates = heavyParts.map((e: any) => normPlate(e.vehicleNumber)).filter(Boolean);
-    const equipment = (Array.isArray(body.equipment) ? body.equipment : [])
+    const equipmentRaw = (Array.isArray(body.equipment) ? body.equipment : [])
       .map((e: any) => ({ type: (e?.type ?? '').toString().trim(), vehicleNumber: (e?.vehicleNumber ?? '').toString().trim() }))
       .filter((e: any) => e.type || e.vehicleNumber)
-      .slice(0, 20)
+      .slice(0, 20);
+    // 종류는 필수(차량번호만 있는 행 거부) — 차량번호는 선택(현장 도착 시 사진 등록)
+    if (equipmentRaw.some((e: any) => e.vehicleNumber && !e.type)) {
+      return NextResponse.json(
+        { success: false, code: 'NO_EQUIPMENT_TYPE', message: '장비 종류를 입력해 주세요(차량번호만으로는 등록할 수 없습니다).' },
+        { status: 400 }
+      );
+    }
+    const equipment = equipmentRaw
+      .filter((e: any) => e.type)
       .map((e: any) => ({ ...e, matched: !!normPlate(e.vehicleNumber) && heavyPlates.includes(normPlate(e.vehicleNumber)) }));
-    // ②: 중장비 체크인데 장비 정보가 하나도 없으면 거부(프론트 우회 방지).
+    // ②: 중장비 체크인데 장비 종류가 하나도 없으면 거부(프론트 우회 방지).
     if (heavyChecked && equipment.length === 0) {
       return NextResponse.json(
-        { success: false, code: 'NO_EQUIPMENT', message: '중장비 작업은 장비 정보(종류·차량번호)를 1개 이상 입력해야 합니다.' },
+        { success: false, code: 'NO_EQUIPMENT', message: '중장비 작업은 장비 종류를 1개 이상 입력해야 합니다.' },
         { status: 400 }
       );
     }

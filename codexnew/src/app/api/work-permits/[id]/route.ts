@@ -26,7 +26,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
        tbm, supplemental, equipment, note, created_at,
        applicant_signature, issuer_title, issuer_signature, approved_by, approved_at,
        approver_name, approver_title, approver_signature, approval_mode, approver_signed_at,
-       completion, dept_confirmations, started_by, started_at, rollback_logs`
+       completion, dept_confirmations, started_by, started_at, rollback_logs, field_joins, equipment_arrivals`
     )
     .eq('id', ctx.params.id)
     .maybeSingle();
@@ -126,6 +126,25 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     } catch { /* */ }
   }
 
+  // 현장 합류·장비 도착(append 기록) — 사진은 signed URL로
+  const fieldJoinsRaw: any[] = Array.isArray(permit.field_joins) ? permit.field_joins : [];
+  const arrivalsRaw: any[] = Array.isArray(permit.equipment_arrivals) ? permit.equipment_arrivals : [];
+  const equipmentArrivals: any[] = [];
+  for (const a of arrivalsRaw) {
+    let photoUrl: string | null = null;
+    try {
+      if (a?.photo) {
+        const { data: signed } = await supabase.storage.from('work-permit-photos').createSignedUrl(a.photo, 600);
+        photoUrl = signed?.signedUrl ?? null;
+      }
+    } catch { /* */ }
+    equipmentArrivals.push({ type: a?.type ?? '', vehicleNumber: a?.vehicleNumber ?? null, at: a?.at ?? null, photoUrl });
+  }
+  // 참여자별 합류 시각 매칭용(이름||정규화전화)
+  const joinAtByKey = new Map<string, string>(
+    fieldJoinsRaw.map((j: any) => [`${(j?.name ?? '').trim()}||${normalizePhone(j?.phone)}`, j?.joinedAt ?? ''])
+  );
+
   // 1C-2 필수문서 데이터(인쇄 첨부용)
   let docs = null;
   try {
@@ -207,8 +226,11 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
           expiresAt: p.expires_at,
           tbmSignature: conf?.signature ?? null,
           tbmConfirmedAt: conf?.confirmedAt ?? null,
+          fieldJoinedAt: joinAtByKey.get(key) || null, // 현장 합류 시각(있으면 뱃지 표시)
         };
       }),
+      fieldJoinCount: fieldJoinsRaw.length,
+      equipmentArrivals, // [{type, vehicleNumber, at, photoUrl}]
       note: permit.note,
       createdAt: permit.created_at,
       docs,

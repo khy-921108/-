@@ -211,6 +211,7 @@ export default function WorkPermitStart() {
           <div>
             <p className="font-bold text-slate-700">규칙</p>
             <p>허가서는 <b>당일 하루만 유효</b>(매일 신청). 지난 허가서는 조회 화면의 <b>[같은 내용으로 재신청]</b>으로 간편하게.</p>
+            <p className="text-xs text-slate-500 mt-0.5">※ 계획에 없던 위험작업(중장비 등)을 추가해야 하면 새 허가서를 신청하거나 관리자에게 되돌리기를 요청하세요.</p>
           </div>
           <div className="rounded-lg bg-red-50 border border-red-200 p-3">
             <p className="font-bold text-red-700">⚠ 위반 시 조치 (반드시 읽어주세요)</p>

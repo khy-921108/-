@@ -32,6 +32,7 @@ interface Item {
   approvedAt?: string | null;
   createdAt: string;
   signature?: SigStatus;
+  arrivalsCount?: number;
 }
 
 /** R-6 진행단계 뱃지 (서버 계산 stage 기반 — status 컬럼 오염 방지) */
@@ -218,7 +219,12 @@ export default function AdminWorkPermitsPage() {
                   <p className="text-xs text-slate-500 mt-0.5">{it.companyName} · 신청인 {it.applicantName} · 참여자 {it.participantCount}명</p>
                   <p className="text-xs text-slate-600 mt-0.5">📅 작업예정 {fmtDateTime(it.workStart)} ~ {fmtDateTime(it.workEnd)}</p>
                   {supp.length > 0 && (
-                    <p className="text-xs text-amber-700 mt-0.5">보충: {supp.join(', ')}</p>
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      보충: {supp.join(', ')}
+                      {it.supplemental?.heavy === 'Y' && (it.arrivalsCount ?? 0) === 0 && (
+                        <span className="ml-1 rounded bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5">⚠ 장비 미등록</span>
+                      )}
+                    </p>
                   )}
                   <p className="text-xs text-slate-400 mt-0.5">신청일 {formatDate(it.createdAt)}</p>
                 </div>
