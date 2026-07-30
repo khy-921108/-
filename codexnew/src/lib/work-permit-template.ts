@@ -66,6 +66,10 @@ export const TEMPLATE_CELLS = {
     smSig: 'I6', // 서명칸
     contentRowStart: 9, // 작업내용 B / 위험요인 D / 안전대책 F (행 9~14)
     contentRowEnd: 14,
+    // ▶ 오늘의 안전 지시사항 (작업팀장 기재) — 헤더 A15, 기재란 A16:I16 ~ A18:I18 (3줄, 각 행 A:I 병합)
+    //   시스템은 safetyInstructions 만 채우고 나머지 줄은 빈칸 유지(다운로드 후 수기 추가 공간)
+    instrRowStart: 16,
+    instrRowEnd: 18,
     // 참석자 그리드: 좌 행31~42(성명 B/소속 C/서명 D), 우 행31~42(성명 G/소속 H/서명 I)
     participantRowStart: 31,
     participantRowEnd: 42, // 12행 × 2열 = 24칸
@@ -716,6 +720,30 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
   }
   (te?.riskFactors ?? []).slice(0, 6).forEach((rf, i) => setCell(ts, `D${rs + i}`, rf));
   (te?.safetyMeasures ?? []).slice(0, 6).forEach((mz, i) => setCell(ts, `F${rs + i}`, mz));
+
+  // ▶ 오늘의 안전 지시사항 (작업팀장 기재) — 2차 입회 입력값을 기재란(A16:I18)에 출력.
+  //  기재란은 원래 빈칸이 정상 → safetyInstructions 만 쓰고 남는 줄은 그대로 빈칸(수기 추가 공간).
+  if (data.safetyInstructions && String(data.safetyInstructions).trim()) {
+    const maxRows = T.instrRowEnd - T.instrRowStart + 1; // 3줄
+    const WIDTH = 55; // A:I 전체폭 기준 한 줄 대략 글자수
+    const instrLines: string[] = [];
+    // 입력의 줄바꿈 존중 → 각 줄을 폭에 맞게 단어 단위로 접기
+    for (const raw of String(data.safetyInstructions).split(/\r?\n/)) {
+      const text = raw.replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      let cur = '';
+      for (const w of text.split(' ')) {
+        if (!cur) { cur = w; continue; }
+        if ((cur + ' ' + w).length <= WIDTH) cur += ' ' + w;
+        else { instrLines.push(cur); cur = w; }
+      }
+      if (cur) instrLines.push(cur);
+    }
+    // 줄 수 초과 시 마지막 줄에 합쳐 담아 내용 유실 방지
+    const out = instrLines.slice(0, maxRows);
+    if (instrLines.length > maxRows) out[maxRows - 1] = instrLines.slice(maxRows - 1).join(' ');
+    out.forEach((ln, i) => setCell(ts, `A${T.instrRowStart + i}`, ln));
+  }
   // 참석자 그리드 — 좌12·우12 (서명 = 참여자별 TBM 스탬프[이름||전화 매칭], 미확인 공란)
   const ps = data.participants ?? [];
   const rows = T.participantRowEnd - T.participantRowStart + 1; // 12

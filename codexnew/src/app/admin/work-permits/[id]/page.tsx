@@ -40,33 +40,36 @@ function SigRow({ label, sub, signature, who, at, pending, action }: {
   pending?: string; action?: React.ReactNode;
 }) {
   const signed = !!(signature && signature.startsWith('data:image/'));
+  // 좁은 폭: 라벨 → 서명+시각 → 버튼 세로 스택 / 넓은 폭(sm↑): 기존 가로 배치
   return (
-    <div className="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0">
-      <div className="w-28 shrink-0">
+    <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 py-2 border-b border-slate-100 last:border-0">
+      <div className="sm:w-28 sm:shrink-0">
         <p className="text-sm font-semibold text-slate-700">{label}</p>
         {sub && <p className="text-[11px] text-slate-400">{sub}</p>}
       </div>
-      {signed ? (
-        <>
-          <img src={signature!} alt="서명" className="h-9 border border-slate-200 rounded bg-white px-1 shrink-0" />
-          <div className="text-xs text-slate-600 min-w-0 flex items-baseline gap-1">
-            {who ? (
-              <span className="font-medium truncate">{who}</span>
-            ) : (
-              <span
-                className="text-slate-400 italic whitespace-nowrap cursor-help"
-                title="내 정보에서 부서·이름·직책을 등록하세요."
-              >(정보 미등록)</span>
-            )}
-            {at && <span className="text-slate-400 whitespace-nowrap shrink-0"> · {fmtDateTime(at)}</span>}
-          </div>
-        </>
-      ) : (
-        <span className={`rounded-full text-xs font-medium px-2 py-0.5 ${pending ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
-          {pending ?? '미서명'}
-        </span>
-      )}
-      {action && <div className="ml-auto shrink-0">{action}</div>}
+      <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
+        {signed ? (
+          <>
+            <img src={signature!} alt="서명" className="h-9 border border-slate-200 rounded bg-white px-1 shrink-0" />
+            <div className="text-xs text-slate-600 min-w-0 flex items-baseline gap-1 flex-wrap">
+              {who ? (
+                <span className="font-medium truncate">{who}</span>
+              ) : (
+                <span
+                  className="text-slate-400 italic whitespace-nowrap cursor-help"
+                  title="내 정보에서 부서·이름·직책을 등록하세요."
+                >(정보 미등록)</span>
+              )}
+              {at && <span className="text-slate-400 whitespace-nowrap">· {fmtDateTime(at)}</span>}
+            </div>
+          </>
+        ) : (
+          <span className={`rounded-full text-xs font-medium px-2 py-0.5 whitespace-nowrap ${pending ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
+            {pending ?? '미서명'}
+          </span>
+        )}
+      </div>
+      {action && <div className="flex flex-wrap gap-1.5 justify-end sm:shrink-0">{action}</div>}
     </div>
   );
 }
@@ -306,13 +309,14 @@ export default function AdminWorkPermitDetailPage() {
             <span className="font-mono text-2xl sm:text-3xl font-extrabold tracking-tight text-brand whitespace-nowrap">{data.permitNumber}</span>
             <StageBadge stage={data.stage} />
           </div>
+          {/* 콤팩트 버튼(내용만큼 폭) — btn-secondary(w-full)는 flex 안에서 줄바꿈을 유발해 사용하지 않음 */}
           <div className="flex gap-2 flex-wrap">
             {/* 현장 입회 중 합류자 추가·장비 도착 등록용 — 기존 TBM 화면 재사용(종료확인 후 숨김) */}
             {!closed && (
-              <a href={`/work-permit/tbm/${id}`} target="_blank" rel="noreferrer" className="rounded-xl bg-emerald-600 text-white text-sm font-bold px-4 py-2 hover:bg-emerald-700">🦺 현장 TBM 화면 열기</a>
+              <a href={`/work-permit/tbm/${id}`} target="_blank" rel="noreferrer" className="shrink-0 whitespace-nowrap rounded-xl bg-emerald-600 text-white text-sm font-bold px-4 py-2 hover:bg-emerald-700">🦺 현장 TBM 화면 열기</a>
             )}
-            <a href={`/work-permit/print/${id}`} target="_blank" rel="noreferrer" className="btn-secondary text-sm">🖨 인쇄</a>
-            <a href={`/api/work-permits/${id}/xlsx`} className="btn-secondary text-sm">📥 회사양식 xlsx</a>
+            <a href={`/work-permit/print/${id}`} target="_blank" rel="noreferrer" className="shrink-0 whitespace-nowrap rounded-xl border-2 border-brand bg-white text-brand text-sm font-bold px-4 py-2 hover:bg-brand/5">🖨 인쇄</a>
+            <a href={`/api/work-permits/${id}/xlsx`} className="shrink-0 whitespace-nowrap rounded-xl border-2 border-brand bg-white text-brand text-sm font-bold px-4 py-2 hover:bg-brand/5">📥 회사양식 xlsx</a>
           </div>
         </div>
         <p className="text-sm text-slate-600 mt-2">{info.workName} · {data.companyName}</p>
@@ -415,13 +419,15 @@ export default function AdminWorkPermitDetailPage() {
 
       {/* 참여자 3상태 */}
       <section className="card text-sm">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="font-bold text-slate-700">참여자 ({participants.length})</h2>
-          <span className={`text-[11px] rounded-full px-2 py-0.5 ${tbmStarted ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <h2 className="font-bold text-slate-700 whitespace-nowrap">참여자 ({participants.length})</h2>
+          <span className={`shrink-0 whitespace-nowrap text-[11px] rounded-full px-2 py-0.5 ${tbmStarted ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
             {tbmStarted ? 'TBM 진행/완료' : 'TBM 시작 전'}
           </span>
         </div>
-        <table className="w-full text-xs">
+        {/* 좁은 폭에서 표가 잘리지 않게 가로 스크롤 */}
+        <div className="overflow-x-auto -mx-1 px-1">
+        <table className="w-full text-xs min-w-[420px]">
           <thead>
             <tr className="text-slate-400 border-b border-slate-100">
               <th className="text-left py-1">성명</th><th className="text-left">소속</th>
@@ -449,6 +455,7 @@ export default function AdminWorkPermitDetailPage() {
             })}
           </tbody>
         </table>
+        </div>
       </section>
 
       {/* TBM 상세 — 실제 내용(사진·작업자 서명) 표시: "보고 승인" */}
@@ -498,12 +505,12 @@ export default function AdminWorkPermitDetailPage() {
         <h2 className="font-bold text-slate-700 mb-1">승인 서명 (1·2차)</h2>
         <SigRow label="신청인" sub="TBM 팀장 겸용" signature={data.applicantSignature} who={info.applicantName} at={data.createdAt} />
         {/* 안전관리자(TBM 확인) — 업체 안전관리자 기능 미도입, 죽은 필드 대신 보류 표시 */}
-        <div className="flex items-center gap-3 py-2 border-b border-slate-100">
-          <div className="w-28 shrink-0">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 py-2 border-b border-slate-100">
+          <div className="sm:w-28 sm:shrink-0">
             <p className="text-sm font-semibold text-slate-700">안전관리자</p>
             <p className="text-[11px] text-slate-400">TBM 확인</p>
           </div>
-          <span className="rounded-full text-xs font-medium px-2 py-0.5 bg-slate-100 text-slate-400 cursor-help" title="업체 안전관리자 기능 도입 시 사용 예정">보류</span>
+          <span className="self-start rounded-full text-xs font-medium px-2 py-0.5 bg-slate-100 text-slate-400 cursor-help whitespace-nowrap" title="업체 안전관리자 기능 도입 시 사용 예정">보류</span>
         </div>
         <SigRow label="발급 (1차)" sub="안전환경" signature={data.issuer?.signature} who={slabel(data.issuer?.name)} at={data.issuer?.at}
           action={(hasApprove && !started && !isPast) || rbShow('issuer') ? (
@@ -521,9 +528,9 @@ export default function AdminWorkPermitDetailPage() {
                 ) : (witnessSigned || tbmComplete) ? (
                   btn(witnessSigned ? '재서명' : '2차 승인', startWitness)
                 ) : (
-                  <div className="text-right">
-                    <button disabled className="text-xs px-3 py-1.5 rounded-lg font-bold bg-slate-100 text-slate-400 cursor-not-allowed">2차 승인</button>
-                    <p className="text-[10px] text-amber-600 mt-0.5 whitespace-nowrap">{tbmReason}</p>
+                  <div className="text-right min-w-0">
+                    <button disabled className="text-xs px-3 py-1.5 rounded-lg font-bold bg-slate-100 text-slate-400 cursor-not-allowed whitespace-nowrap">2차 승인</button>
+                    <p className="text-[10px] text-amber-600 mt-0.5">{tbmReason}</p>
                   </div>
                 )
               )}
@@ -555,29 +562,31 @@ export default function AdminWorkPermitDetailPage() {
               }
             }
             return (
-              <div key={w.key} className="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0">
-                <div className="w-28 shrink-0">
+              <div key={w.key} className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 py-2 border-b border-slate-100 last:border-0">
+                <div className="sm:w-28 sm:shrink-0">
                   <p className="text-sm font-semibold text-slate-700">{w.label}</p>
                   <p className="text-[11px] text-slate-400">확인: {dept}</p>
                 </div>
-                {done ? (
-                  <>
-                    <img src={dc.signature} alt="확인서명" className="h-9 border border-slate-200 rounded bg-white px-1" />
-                    <div className="text-xs text-slate-600 min-w-0">
-                      {proxy
-                        ? <span className="text-amber-700 font-bold">긴급대리(안전환경)</span>
-                        : (dc.name || slabel(dc.by))
-                          ? <span className="font-medium truncate">{dc.name || slabel(dc.by)}</span>
-                          : <span className="text-slate-400 italic whitespace-nowrap cursor-help" title="내 정보에서 부서·이름·직책을 등록하세요.">(정보 미등록)</span>}
-                      {dc.at && <span className="text-slate-400"> · {fmtDateTime(dc.at)}</span>}
-                      {proxy && dc.reason && <p className="text-[11px] text-amber-600">사유: {dc.reason}</p>}
-                    </div>
-                  </>
-                ) : (
-                  <span className="rounded-full text-xs font-medium px-2 py-0.5 bg-amber-50 text-amber-700">대기</span>
-                )}
+                <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
+                  {done ? (
+                    <>
+                      <img src={dc.signature} alt="확인서명" className="h-9 border border-slate-200 rounded bg-white px-1 shrink-0" />
+                      <div className="text-xs text-slate-600 min-w-0">
+                        {proxy
+                          ? <span className="text-amber-700 font-bold">긴급대리(안전환경)</span>
+                          : (dc.name || slabel(dc.by))
+                            ? <span className="font-medium truncate">{dc.name || slabel(dc.by)}</span>
+                            : <span className="text-slate-400 italic whitespace-nowrap cursor-help" title="내 정보에서 부서·이름·직책을 등록하세요.">(정보 미등록)</span>}
+                        {dc.at && <span className="text-slate-400 whitespace-nowrap"> · {fmtDateTime(dc.at)}</span>}
+                        {proxy && dc.reason && <p className="text-[11px] text-amber-600">사유: {dc.reason}</p>}
+                      </div>
+                    </>
+                  ) : (
+                    <span className="rounded-full text-xs font-medium px-2 py-0.5 bg-amber-50 text-amber-700 whitespace-nowrap">대기</span>
+                  )}
+                </div>
                 {(action || rbShow('dept', w.key)) && (
-                  <div className="ml-auto shrink-0 flex items-center gap-1.5 flex-wrap justify-end">
+                  <div className="flex items-center gap-1.5 flex-wrap justify-end sm:shrink-0">
                     {action}
                     {rbShow('dept', w.key) && rbBtn({ step: 'dept', supKey: w.key, label: `${w.label} 별지 현장확인` })}
                   </div>
@@ -590,18 +599,18 @@ export default function AdminWorkPermitDetailPage() {
 
       {/* 작업개시 게이트 */}
       <section className="card">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="font-bold text-slate-700">작업 개시 승인</h2>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
+          <div className="min-w-0">
+            <h2 className="font-bold text-slate-700 whitespace-nowrap">작업 개시 승인</h2>
             {started
-              ? <p className="text-xs text-emerald-600 mt-0.5">개시 승인됨{data.startedBy ? ` · ${data.startedBy}` : ''}{data.startedAt ? ` · ${fmtDateTime(data.startedAt)}` : ''}</p>
+              ? <p className="text-xs text-emerald-600 mt-0.5 break-all">개시 승인됨{data.startedBy ? ` · ${data.startedBy}` : ''}{data.startedAt ? ` · ${fmtDateTime(data.startedAt)}` : ''}</p>
               : canStart
                 ? <p className="text-xs text-slate-500 mt-0.5">모든 확인 완료 — 개시 가능</p>
                 : <p className="text-xs text-amber-600 mt-0.5">차단: {startMissing.join(', ')} 미완료</p>}
           </div>
           {hasApprove && !started && !isPast && (
             <button onClick={startWork} disabled={!canStart}
-              className={`text-sm px-4 py-2 rounded-lg font-bold ${canStart ? 'btn-primary' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}>
+              className={`shrink-0 self-start sm:self-auto whitespace-nowrap text-sm px-4 py-2 rounded-lg font-bold ${canStart ? 'bg-brand text-white hover:opacity-90' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}>
               작업 개시 승인
             </button>
           )}
