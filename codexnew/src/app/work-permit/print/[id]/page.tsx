@@ -201,6 +201,41 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
         )}
       </section>
 
+      {/* ②-2 TBM 현장사진(추가) — 작업 개시 후 현장 추가 등록. 1건 이상일 때만 별지 생성 */}
+      {Array.isArray(data.fieldAdditions) && data.fieldAdditions.length > 0 && (
+        <section className="sheet">
+          <h1 className="title">TBM 현장 사진 (추가)</h1>
+          <div className="photos">
+            {data.fieldAdditions.map((f: any, i: number) => {
+              const who = f.actorType === 'ADMIN' ? '관리자' : '소장';
+              const what = [
+                (f.workers?.length ?? 0) > 0 ? `작업자 ${f.workers.length}명` : '',
+                (f.equipment?.length ?? 0) > 0 ? `장비 ${f.equipment.length}대` : '',
+              ].filter(Boolean).join('·');
+              return (
+                <div key={i} style={{ textAlign: 'center' }}>
+                  {f.photoUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={f.photoUrl} alt={`현장 추가 ${i + 1}`} className="photo" />
+                  )}
+                  <p className="muted" style={{ fontSize: 11 }}>
+                    현장 추가 · {fmtDateTime(f.at)} ({who}){what ? ` — ${what}` : ''}
+                  </p>
+                  {(f.workers?.length ?? 0) > 0 && (
+                    <p className="muted" style={{ fontSize: 11 }}>합류: {f.workers.map((w: any) => w.name).join(', ')}</p>
+                  )}
+                  {(f.equipment?.length ?? 0) > 0 && (
+                    <p className="muted" style={{ fontSize: 11 }}>
+                      장비: {f.equipment.map((e: any) => `${e.type}${e.vehicleNumber ? ` ${e.vehicleNumber}` : ''}`).join(', ')}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* ③ 마스터 */}
       <section className="sheet">
         <div className="master-head">

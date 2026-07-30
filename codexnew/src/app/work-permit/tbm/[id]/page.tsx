@@ -56,31 +56,30 @@ export default function SiteTbmPage() {
   const [signFor, setSignFor] = useState<string | null>(null);
   const [sig, setSig] = useState('');
 
-  // 현장 합류자 추가
-  const [joinOpen, setJoinOpen] = useState(false);
+  // ── 현장 추가 등록(통합: 작업자 합류 + 장비 도착) ──
+  const [addOpen, setAddOpen] = useState(false);
+  const [addWorker, setAddWorker] = useState(false);
+  const [addEquip, setAddEquip] = useState(false);
+  const [addMsg, setAddMsg] = useState('');
+  const [addBusy, setAddBusy] = useState(false);
+  // 작업자
   const [joinForm, setJoinForm] = useState({ name: '', birthDate: '', phone: '' });
-  const [joinCand, setJoinCand] = useState<any>(null);       // 수료 확인 결과(유효)
-  const [joinBlocked, setJoinBlocked] = useState('');        // 수료 없음/만료 메시지
+  const [joinCand, setJoinCand] = useState<any>(null);   // 교육·서류 확인 결과
+  const [joinBlocked, setJoinBlocked] = useState('');    // 교육 없음/만료
   const [joinBriefed, setJoinBriefed] = useState(false);
   const [joinSig, setJoinSig] = useState('');
-  const [joinBusy, setJoinBusy] = useState(false);
-  const [joinMsg, setJoinMsg] = useState('');
-  // 합류자 필수서류 그 자리 처리(개인서약 작성 / 이행각서 명단 추가)
+  // 필수서류 그 자리 처리
   const [plForm, setPlForm] = useState({ nationality: '한국', bloodType: 'A형', jobType: '' });
   const [plConfirm, setPlConfirm] = useState(false);
   const [plSig, setPlSig] = useState('');
   const [plBusy, setPlBusy] = useState(false);
   const [utManager, setUtManager] = useState('');
   const [utBusy, setUtBusy] = useState(false);
-
-  // 장비 도착 등록
-  const arrFileRef = useRef<HTMLInputElement>(null);
-  const [arrOpen, setArrOpen] = useState(false);
-  const [arrType, setArrType] = useState('');
-  const [arrVehicle, setArrVehicle] = useState('');
-  const [arrPhoto, setArrPhoto] = useState('');
-  const [arrBusy, setArrBusy] = useState(false);
-  const [arrMsg, setArrMsg] = useState('');
+  // 장비(여러 대)
+  const [equipRows, setEquipRows] = useState<{ type: string; vehicleNumber: string }[]>([{ type: '', vehicleNumber: '' }]);
+  // 현장 사진(항상 필수)
+  const addFileRef = useRef<HTMLInputElement>(null);
+  const [fieldPhoto, setFieldPhoto] = useState('');
 
   const call = useCallback(async (c: Cred, extra: any) => {
     const ac = new AbortController();
@@ -105,13 +104,23 @@ export default function SiteTbmPage() {
     setCred(c); setData(json.data); return true;
   }, [call]);
 
-  // 진입 시 sessionStorage 자격 자동 사용
+  // 진입 시: ① 관리자 로그인 세션이면 본인확인 없이 바로 진행(서버가 세션으로 인증)
+  //          ② 아니면 sessionStorage 자격 자동 사용(업체 경로)
   useEffect(() => {
+    let cred0: Cred | null = null;
     try {
       const raw = sessionStorage.getItem('wp_tbm_cred');
-      if (raw) { const c = JSON.parse(raw); setForm(c); loadSession(c); }
+      if (raw) cred0 = JSON.parse(raw);
     } catch { /* */ }
-  }, [loadSession]);
+    if (cred0) setForm(cred0);
+    // 빈 자격으로 먼저 시도 → 관리자 세션이면 통과, 아니면 실패(조용히 무시하고 본인확인 폼 표시)
+    const boot = async () => {
+      const probe: Cred = cred0 ?? { name: '', birthDate: '', phone: '' };
+      const json = await call(probe, { action: 'session' });
+      if (json.success) { setCred(probe); setData(json.data); }
+    };
+    boot();
+  }, [call]);
 
   const onVerify = async () => {
     if (!form.name.trim() || !form.birthDate || form.phone.replace(/[^0-9]/g, '').length < 10) {
@@ -152,22 +161,22 @@ export default function SiteTbmPage() {
     setBusy(false);
   };
 
-  // 합류자 1단계: 수료 확인
-  const checkJoin = async () => {
+  // 작업자 교육·서류 확인(저장 없음)
+  const checkWorker = async () => {
     if (!cred) return;
-    setJoinMsg(''); setJoinBlocked(''); setJoinCand(null);
+    setAddMsg(''); setJoinBlocked(''); setJoinCand(null);
     if (!joinForm.name.trim() || !joinForm.birthDate || joinForm.phone.length < 10) {
-      setJoinMsg('이름·생년월일·연락처를 정확히 입력해 주세요.'); return;
+      setAddMsg('작업자의 이름·생년월일·연락처를 정확히 입력해 주세요.'); return;
     }
-    setJoinBusy(true);
+    setAddBusy(true);
     const json = await call(cred, {
-      action: 'join', checkOnly: true,
+      action: 'check-worker',
       joinName: joinForm.name.trim(), joinBirthDate: joinForm.birthDate, joinPhone: joinForm.phone,
     });
-    setJoinBusy(false);
+    setAddBusy(false);
     if (!json.success) {
       if (json.code === 'NOT_ELIGIBLE') setJoinBlocked(json.message || '안전교육을 먼저 받아야 합니다.');
-      else setJoinMsg(json.message || '확인 실패');
+      else setAddMsg(json.message || '확인 실패');
       return;
     }
     setJoinCand(json.data); setJoinBriefed(false); setJoinSig('');
@@ -175,13 +184,13 @@ export default function SiteTbmPage() {
     setUtManager(json.data?.undertakingManagerName ?? '');
   };
 
-  // 합류자 개인서약 그 자리 작성 → 재확인
+  // 개인서약 그 자리 작성 → 재확인
   const issueJoinPledge = async () => {
     if (!joinCand) return;
-    if (!plForm.jobType.trim()) { setJoinMsg('직종을 입력해 주세요.'); return; }
-    if (!plConfirm) { setJoinMsg('서약 내용 확인에 동의해 주세요.'); return; }
-    if (!plSig) { setJoinMsg('서약자 본인 서명을 입력해 주세요.'); return; }
-    setPlBusy(true); setJoinMsg('');
+    if (!plForm.jobType.trim()) { setAddMsg('직종을 입력해 주세요.'); return; }
+    if (!plConfirm) { setAddMsg('서약 내용 확인에 동의해 주세요.'); return; }
+    if (!plSig) { setAddMsg('서약자 본인 서명을 입력해 주세요.'); return; }
+    setPlBusy(true); setAddMsg('');
     try {
       const res = await fetch('/api/safety-pledges', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -192,16 +201,16 @@ export default function SiteTbmPage() {
         }),
       });
       const j = await res.json();
-      if (!j.success) { setJoinMsg(j.message || '서약서 발급 실패'); return; }
-      await checkJoin(); // 서류 상태 재확인
-    } catch { setJoinMsg('네트워크 오류'); } finally { setPlBusy(false); }
+      if (!j.success) { setAddMsg(j.message || '서약서 발급 실패'); return; }
+      await checkWorker();
+    } catch { setAddMsg('네트워크 오류'); } finally { setPlBusy(false); }
   };
 
-  // 이행각서 명단에 합류자 추가 재발급 → 재확인
+  // 이행각서 명단 추가 재발급 → 재확인
   const reissueUndertaking = async () => {
-    if (!joinCand?.companyId) { setJoinMsg('업체 정보가 없어 각서를 재발급할 수 없습니다.'); return; }
-    if (!utManager.trim()) { setJoinMsg('관리감독자명을 입력해 주세요.'); return; }
-    setUtBusy(true); setJoinMsg('');
+    if (!joinCand?.companyId) { setAddMsg('업체 정보가 없어 각서를 재발급할 수 없습니다.'); return; }
+    if (!utManager.trim()) { setAddMsg('관리감독자명을 입력해 주세요.'); return; }
+    setUtBusy(true); setAddMsg('');
     try {
       const res = await fetch('/api/company-undertakings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -211,45 +220,50 @@ export default function SiteTbmPage() {
         }),
       });
       const j = await res.json();
-      if (!j.success) { setJoinMsg(j.message || '이행각서 재발급 실패'); return; }
-      await checkJoin();
-    } catch { setJoinMsg('네트워크 오류'); } finally { setUtBusy(false); }
+      if (!j.success) { setAddMsg(j.message || '이행각서 재발급 실패'); return; }
+      await checkWorker();
+    } catch { setAddMsg('네트워크 오류'); } finally { setUtBusy(false); }
   };
 
-  // 합류자 2단계: 설명 확인 + 서명 → 등록
-  const submitJoin = async () => {
-    if (!cred || !joinCand) return;
-    if (!joinBriefed) { setJoinMsg('위험요인·안전대책 설명 확인에 체크해 주세요.'); return; }
-    if (!joinSig) { setJoinMsg('합류자 서명을 입력해 주세요.'); return; }
-    setJoinBusy(true); setJoinMsg('');
-    const json = await call(cred, {
-      action: 'join',
-      joinName: joinForm.name.trim(), joinBirthDate: joinForm.birthDate, joinPhone: joinForm.phone,
-      briefed: true, signature: joinSig,
-    });
-    setJoinBusy(false);
-    if (!json.success) { setJoinMsg(json.message || '합류 등록 실패'); return; }
-    setJoinOpen(false); setJoinForm({ name: '', birthDate: '', phone: '' }); setJoinCand(null); setJoinSig('');
-    await loadSession(cred);
-  };
-
-  const addArrivalPhoto = async (files: FileList | null) => {
+  const pickAddPhoto = async (files: FileList | null) => {
     if (!files || !files[0]) return;
-    try { setArrPhoto(await resizeToDataUrl(files[0])); setArrMsg(''); } catch { setArrMsg('사진 처리 실패'); }
-    finally { if (arrFileRef.current) arrFileRef.current.value = ''; }
+    try { setFieldPhoto(await resizeToDataUrl(files[0])); setAddMsg(''); } catch { setAddMsg('사진 처리 실패'); }
+    finally { if (addFileRef.current) addFileRef.current.value = ''; }
   };
 
-  const submitArrival = async () => {
+  const resetAddForm = () => {
+    setAddOpen(false); setAddWorker(false); setAddEquip(false); setAddMsg('');
+    setJoinForm({ name: '', birthDate: '', phone: '' }); setJoinCand(null); setJoinBlocked('');
+    setJoinBriefed(false); setJoinSig('');
+    setEquipRows([{ type: '', vehicleNumber: '' }]); setFieldPhoto('');
+  };
+
+  // 통합 등록 제출 — 서버가 동일 검증(사진 필수, 작업자면 서류·서명 필수)
+  const submitFieldAdd = async () => {
     if (!cred) return;
-    if (!arrType.trim()) { setArrMsg('장비 종류를 입력해 주세요.'); return; }
-    if (!arrPhoto) { setArrMsg('장비 사진을 촬영해 주세요(필수).'); return; }
-    setArrBusy(true); setArrMsg('');
+    if (!addWorker && !addEquip) { setAddMsg('추가할 항목을 최소 1개 선택해 주세요.'); return; }
+    if (!fieldPhoto) { setAddMsg('현장 사진을 촬영해 주세요(필수).'); return; }
+    if (addWorker) {
+      if (!joinCand) { setAddMsg('작업자의 [교육·서류 확인]을 먼저 진행해 주세요.'); return; }
+      if (!joinCand.docsOk) { setAddMsg('필수서류를 먼저 처리해 주세요.'); return; }
+      if (!joinBriefed) { setAddMsg('위험요인·안전대책 설명 확인에 체크해 주세요.'); return; }
+      if (!joinSig) { setAddMsg('작업자 서명을 입력해 주세요.'); return; }
+    }
+    const equipment = equipRows.map((r) => ({ type: r.type.trim(), vehicleNumber: r.vehicleNumber.trim() })).filter((r) => r.type);
+    if (addEquip && equipment.length === 0) { setAddMsg('장비 종류를 입력해 주세요.'); return; }
+    setAddBusy(true); setAddMsg('');
     const json = await call(cred, {
-      action: 'arrival', equipType: arrType.trim(), vehicleNumber: arrVehicle.trim(), image: arrPhoto,
+      action: 'field-add',
+      addWorker, addEquipment: addEquip,
+      image: fieldPhoto,
+      joinName: joinForm.name.trim(), joinBirthDate: joinForm.birthDate, joinPhone: joinForm.phone,
+      briefed: addWorker ? joinBriefed : undefined,
+      signature: addWorker ? joinSig : undefined,
+      equipment: addEquip ? equipment : [],
     });
-    setArrBusy(false);
-    if (!json.success) { setArrMsg(json.message || '등록 실패'); return; }
-    setArrType(''); setArrVehicle(''); setArrPhoto('');
+    setAddBusy(false);
+    if (!json.success) { setAddMsg(json.message || '등록 실패'); return; }
+    resetAddForm();
     await loadSession(cred);
   };
 
@@ -303,6 +317,13 @@ export default function SiteTbmPage() {
       </header>
 
       {error && <div className="card bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
+
+      {/* 관리자 로그인으로 들어온 경우 — 본인확인 생략, 나머지 규칙은 업체와 동일 */}
+      {data.isAdmin && (
+        <div className="card bg-indigo-50 border border-indigo-200 text-indigo-800 text-sm">
+          🛡 <b>관리자 모드</b>로 접속했습니다. (신청인 {data.applicantName ?? ''} 대신 기록되며, 등록 주체가 <b>관리자</b>로 남습니다)
+        </div>
+      )}
 
       {/* 제출/확인 상태 */}
       {data.tbmSubmitted && (
@@ -364,145 +385,178 @@ export default function SiteTbmPage() {
         </section>
       )}
 
-      {/* 현장 합류자 추가 — 개시 후에도 가능, 종료신고 후 불가 */}
-      {!data.reported && !data.closed && (
+      {/* 현장 추가 등록(통합) — 개시 후에도 가능. 종료확인 후 숨김 */}
+      {!data.closed && (
         <section className="card space-y-2">
-          <div className="flex items-center justify-between">
-            <h2 className="font-bold text-slate-700">👷 현장 합류자 {data.joinCount > 0 && <span className="text-xs font-normal text-slate-400">(합류 {data.joinCount}명)</span>}</h2>
-            {!joinOpen && <button onClick={() => setJoinOpen(true)} className="btn-primary text-xs px-3 py-1.5">+ 현장 합류자 추가</button>}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <h2 className="font-bold text-slate-700">
+              ➕ 현장 추가 등록
+              {(data.additions ?? []).length > 0 && <span className="text-xs font-normal text-slate-400"> (기존 {(data.additions ?? []).length}건)</span>}
+            </h2>
+            {!addOpen && <button onClick={() => setAddOpen(true)} className="btn-primary text-xs px-3 py-1.5 shrink-0 whitespace-nowrap">+ 현장 추가 등록</button>}
           </div>
-          {joinOpen && (
-            <div className="space-y-2 pt-1">
-              <div className="grid grid-cols-1 gap-2">
-                <input className="input-base text-sm" placeholder="이름" value={joinForm.name}
-                  onChange={(e) => setJoinForm({ ...joinForm, name: e.target.value })} />
-                <input type="date" className="input-base text-sm" value={joinForm.birthDate}
-                  onChange={(e) => setJoinForm({ ...joinForm, birthDate: e.target.value })} aria-label="생년월일" />
-                <input type="tel" inputMode="numeric" className="input-base text-sm" placeholder="연락처(숫자만)" value={joinForm.phone}
-                  onChange={(e) => setJoinForm({ ...joinForm, phone: e.target.value.replace(/[^0-9]/g, '').slice(0, 11) })} />
-              </div>
-              {!joinCand && !joinBlocked && (
-                <button onClick={checkJoin} disabled={joinBusy} className="btn-secondary w-full text-sm">{joinBusy ? '확인 중…' : '교육 수료 확인'}</button>
-              )}
-              {joinBlocked && (
-                <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 space-y-1">
-                  <p>⛔ {joinBlocked}</p>
-                  <a href="/consent" target="_blank" rel="noreferrer" className="inline-block text-xs font-bold underline">→ 안전교육 시작하기</a>
-                </div>
-              )}
-              {joinCand && (
-                <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 space-y-2">
-                  <p className="text-sm text-emerald-800 font-bold">✅ 교육 유효 — {joinCand.name} ({joinCand.companyName ?? '소속 미상'}{joinCand.targetLabel ? ` · ${joinCand.targetLabel}` : ''})</p>
 
-                  {/* 필수서류 미비 — 그 자리에서 처리 */}
-                  {!joinCand.docsOk && (
-                    <div className="rounded-lg bg-amber-50 border border-amber-300 p-2 space-y-2">
-                      <p className="text-xs font-bold text-amber-800">⚠ 필수서류 미비: {(joinCand.docsMissing ?? []).join(', ')}</p>
-
-                      {!joinCand.pledgeOk && (
-                        <div className="space-y-2 border-t border-amber-200 pt-2">
-                          <p className="text-xs font-bold text-slate-700">📝 개인 안전준수 서약 작성 (그 자리 처리)</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            <select className="input-base text-sm" value={plForm.nationality} onChange={(e) => setPlForm({ ...plForm, nationality: e.target.value })}>
-                              {['한국', '中国', 'Việt Nam', '기타'].map((n) => <option key={n} value={n}>{n}</option>)}
-                            </select>
-                            <select className="input-base text-sm" value={plForm.bloodType} onChange={(e) => setPlForm({ ...plForm, bloodType: e.target.value })}>
-                              {['A형', 'B형', 'O형', 'AB형'].map((b) => <option key={b} value={b}>{b}</option>)}
-                            </select>
-                          </div>
-                          <input className="input-base text-sm" placeholder="직종 (예: 크레인 기사)" value={plForm.jobType} onChange={(e) => setPlForm({ ...plForm, jobType: e.target.value })} />
-                          <details className="rounded bg-white border border-slate-200 p-2 text-[11px] leading-relaxed text-slate-600">
-                            <summary className="cursor-pointer font-bold">서약 내용 보기</summary>
-                            <p className="mt-1">{PLEDGE_INTRO}</p>
-                            <ol className="list-decimal pl-4 mt-1 space-y-0.5">{PLEDGE_CLAUSES.map((c, ci) => <li key={ci}>{c}</li>)}</ol>
-                          </details>
-                          <label className="flex items-start gap-2 text-xs text-slate-700">
-                            <input type="checkbox" className="mt-0.5" checked={plConfirm} onChange={(e) => setPlConfirm(e.target.checked)} />
-                            <span>위 서약 내용을 확인하였으며 동의합니다.</span>
-                          </label>
-                          <div>
-                            <label className="label">서약자 본인 서명 <span className="text-red-500">*</span></label>
-                            <SignaturePad onChange={setPlSig} />
-                          </div>
-                          <button onClick={issueJoinPledge} disabled={plBusy || !plConfirm || !plSig || !plForm.jobType.trim()} className="btn-primary w-full text-xs">
-                            {plBusy ? '발급 중…' : '서약서 발급 후 계속'}
-                          </button>
-                        </div>
-                      )}
-
-                      {joinCand.pledgeOk && joinCand.undertakingStatus !== 'VALID' && (
-                        <div className="space-y-2 border-t border-amber-200 pt-2">
-                          <p className="text-xs font-bold text-slate-700">📄 업체 이행각서 명단 추가 재발급</p>
-                          <input className="input-base text-sm" placeholder="관리감독자명" value={utManager} onChange={(e) => setUtManager(e.target.value)} />
-                          <button onClick={reissueUndertaking} disabled={utBusy || !utManager.trim()} className="btn-primary w-full text-xs">
-                            {utBusy ? '재발급 중…' : '명단에 추가 재발급 후 계속'}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {joinCand.docsOk && (
-                    <>
-                      <label className="flex items-start gap-2 text-sm text-slate-700">
-                        <input type="checkbox" className="mt-0.5" checked={joinBriefed} onChange={(e) => setJoinBriefed(e.target.checked)} />
-                        <span>이 작업의 <b>위험요인·안전대책을 설명받았습니까?</b> (설명 완료 확인)</span>
-                      </label>
-                      <div>
-                        <label className="label">합류자 본인 서명 <span className="text-red-500">*</span></label>
-                        <SignaturePad onChange={setJoinSig} />
-                      </div>
-                      <button onClick={submitJoin} disabled={joinBusy || !joinBriefed || !joinSig} className="btn-primary w-full text-sm">
-                        {joinBusy ? '등록 중…' : '합류 등록 (시각 기록)'}
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-              {joinMsg && <p className="text-xs text-red-600">{joinMsg}</p>}
-              <button onClick={() => { setJoinOpen(false); setJoinCand(null); setJoinBlocked(''); setJoinMsg(''); }} className="text-xs text-slate-400 underline">닫기</button>
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* 장비 도착 등록 — 중장비·굴착 허가서에만, 종료확인 후 불가 */}
-      {data.heavyOrExcav && !data.closed && (
-        <section className="card space-y-2">
-          <div className="flex items-center justify-between">
-            <h2 className="font-bold text-slate-700">🚜 장비 도착 <span className="text-xs font-normal text-slate-400">({(data.arrivals ?? []).length}건)</span></h2>
-            {!arrOpen && <button onClick={() => setArrOpen(true)} className="btn-primary text-xs px-3 py-1.5">장비 도착 등록</button>}
-          </div>
-          {(data.arrivals ?? []).length > 0 && (
+          {(data.additions ?? []).length > 0 && (
             <ul className="text-xs text-slate-600 space-y-0.5">
-              {(data.arrivals ?? []).map((a: any, i: number) => (
-                <li key={i}>✅ {a.type}{a.vehicleNumber ? ` · ${a.vehicleNumber}` : ''} · 도착 {a.at ? new Date(new Date(a.at).getTime() + 9 * 3600 * 1000).toISOString().substring(11, 16) : ''}</li>
+              {(data.additions ?? []).map((f: any, i: number) => (
+                <li key={i}>
+                  ✅ {f.workerCount > 0 ? `작업자 ${f.workerCount}명` : ''}{f.workerCount > 0 && f.equipCount > 0 ? ' · ' : ''}{f.equipCount > 0 ? `장비 ${f.equipCount}대` : ''}
+                  {' · '}{f.at ? new Date(new Date(f.at).getTime() + 9 * 3600 * 1000).toISOString().substring(11, 16) : ''}
+                  {f.actorType === 'ADMIN' ? ' (관리자)' : ' (소장)'}
+                </li>
               ))}
             </ul>
           )}
-          {arrOpen && (
-            <div className="space-y-2 pt-1">
-              <div className="grid grid-cols-2 gap-2">
-                <input className="input-base text-sm" placeholder="장비 종류 * (예: 크레인)" value={arrType} onChange={(e) => setArrType(e.target.value)} />
-                <input className="input-base text-sm" placeholder="차량번호 (선택)" value={arrVehicle} onChange={(e) => setArrVehicle(e.target.value)} />
+
+          {addOpen && (
+            <div className="space-y-3 pt-1">
+              {/* ① 무엇이 추가됩니까? */}
+              <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 space-y-2">
+                <p className="text-sm font-bold text-slate-700">무엇이 추가됩니까?</p>
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" checked={addWorker} onChange={(e) => { setAddWorker(e.target.checked); setAddMsg(''); }} />
+                  <span>작업자 합류</span>
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" checked={addEquip} onChange={(e) => { setAddEquip(e.target.checked); setAddMsg(''); }} disabled={!data.heavyOrExcav} />
+                  <span>장비 도착{!data.heavyOrExcav && <span className="text-xs text-slate-400"> (중장비·굴착 허가서만)</span>}</span>
+                </label>
+                {addEquip && (
+                  <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                    ⚠ 장비 운전기사도 안전교육을 받아야 합니다. 기사가 참여자 명단에 없으면 <b>[작업자 합류]</b>도 함께 체크하세요.
+                  </p>
+                )}
+                {data.reported && addWorker && (
+                  <p className="text-[11px] text-red-600">※ 종료신고 이후에는 작업자 합류를 등록할 수 없습니다.</p>
+                )}
               </div>
-              <input ref={arrFileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => addArrivalPhoto(e.target.files)} />
-              {arrPhoto
-                ? <img src={arrPhoto} alt="장비 사진" className="w-32 h-20 object-cover rounded border border-slate-200" />
-                : null}
-              <button onClick={() => arrFileRef.current?.click()} className="btn-secondary w-full text-sm">📷 장비 사진 촬영 (필수)</button>
-              {arrMsg && <p className="text-xs text-red-600">{arrMsg}</p>}
+
+              {/* ② 작업자 */}
+              {addWorker && (
+                <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+                  <p className="text-sm font-bold text-slate-700">👷 합류 작업자</p>
+                  <input className="input-base text-sm" placeholder="이름" value={joinForm.name}
+                    onChange={(e) => { setJoinForm({ ...joinForm, name: e.target.value }); setJoinCand(null); }} />
+                  <input type="date" className="input-base text-sm" value={joinForm.birthDate}
+                    onChange={(e) => { setJoinForm({ ...joinForm, birthDate: e.target.value }); setJoinCand(null); }} aria-label="생년월일" />
+                  <input type="tel" inputMode="numeric" className="input-base text-sm" placeholder="연락처(숫자만)" value={joinForm.phone}
+                    onChange={(e) => { setJoinForm({ ...joinForm, phone: e.target.value.replace(/[^0-9]/g, '').slice(0, 11) }); setJoinCand(null); }} />
+
+                  {!joinCand && !joinBlocked && (
+                    <button onClick={checkWorker} disabled={addBusy} className="btn-secondary w-full text-sm">{addBusy ? '확인 중…' : '교육·서류 확인'}</button>
+                  )}
+                  {joinBlocked && (
+                    <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 space-y-1">
+                      <p>⛔ {joinBlocked}</p>
+                      <a href="/consent" target="_blank" rel="noreferrer" className="inline-block text-xs font-bold underline">→ 안전교육 시작하기</a>
+                    </div>
+                  )}
+
+                  {joinCand && (
+                    <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 space-y-2">
+                      <p className="text-sm text-emerald-800 font-bold">✅ 교육 유효 — {joinCand.name} ({joinCand.companyName ?? '소속 미상'}{joinCand.targetLabel ? ` · ${joinCand.targetLabel}` : ''})</p>
+
+                      {!joinCand.docsOk && (
+                        <div className="rounded-lg bg-amber-50 border border-amber-300 p-2 space-y-2">
+                          <p className="text-xs font-bold text-amber-800">⚠ 필수서류 미비: {(joinCand.docsMissing ?? []).join(', ')}</p>
+                          {!joinCand.pledgeOk && (
+                            <div className="space-y-2 border-t border-amber-200 pt-2">
+                              <p className="text-xs font-bold text-slate-700">📝 개인 안전준수 서약 작성</p>
+                              <div className="grid grid-cols-2 gap-2">
+                                <select className="input-base text-sm" value={plForm.nationality} onChange={(e) => setPlForm({ ...plForm, nationality: e.target.value })}>
+                                  {['한국', '中国', 'Việt Nam', '기타'].map((n) => <option key={n} value={n}>{n}</option>)}
+                                </select>
+                                <select className="input-base text-sm" value={plForm.bloodType} onChange={(e) => setPlForm({ ...plForm, bloodType: e.target.value })}>
+                                  {['A형', 'B형', 'O형', 'AB형'].map((b) => <option key={b} value={b}>{b}</option>)}
+                                </select>
+                              </div>
+                              <input className="input-base text-sm" placeholder="직종 (예: 크레인 기사)" value={plForm.jobType} onChange={(e) => setPlForm({ ...plForm, jobType: e.target.value })} />
+                              <details className="rounded bg-white border border-slate-200 p-2 text-[11px] leading-relaxed text-slate-600">
+                                <summary className="cursor-pointer font-bold">서약 내용 보기</summary>
+                                <p className="mt-1">{PLEDGE_INTRO}</p>
+                                <ol className="list-decimal pl-4 mt-1 space-y-0.5">{PLEDGE_CLAUSES.map((c, ci) => <li key={ci}>{c}</li>)}</ol>
+                              </details>
+                              <label className="flex items-start gap-2 text-xs text-slate-700">
+                                <input type="checkbox" className="mt-0.5" checked={plConfirm} onChange={(e) => setPlConfirm(e.target.checked)} />
+                                <span>위 서약 내용을 확인하였으며 동의합니다.</span>
+                              </label>
+                              <div>
+                                <label className="label">서약자 본인 서명 <span className="text-red-500">*</span></label>
+                                <SignaturePad onChange={setPlSig} />
+                              </div>
+                              <button onClick={issueJoinPledge} disabled={plBusy || !plConfirm || !plSig || !plForm.jobType.trim()} className="btn-primary w-full text-xs">
+                                {plBusy ? '발급 중…' : '서약서 발급 후 계속'}
+                              </button>
+                            </div>
+                          )}
+                          {joinCand.pledgeOk && joinCand.undertakingStatus !== 'VALID' && (
+                            <div className="space-y-2 border-t border-amber-200 pt-2">
+                              <p className="text-xs font-bold text-slate-700">📄 업체 이행각서 명단 추가 재발급</p>
+                              <input className="input-base text-sm" placeholder="관리감독자명" value={utManager} onChange={(e) => setUtManager(e.target.value)} />
+                              <button onClick={reissueUndertaking} disabled={utBusy || !utManager.trim()} className="btn-primary w-full text-xs">
+                                {utBusy ? '재발급 중…' : '명단에 추가 재발급 후 계속'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {joinCand.docsOk && (
+                        <>
+                          <label className="flex items-start gap-2 text-sm text-slate-700">
+                            <input type="checkbox" className="mt-0.5" checked={joinBriefed} onChange={(e) => setJoinBriefed(e.target.checked)} />
+                            <span>이 작업의 <b>위험요인·안전대책을 설명받았습니까?</b> (설명 완료 확인)</span>
+                          </label>
+                          <div>
+                            <label className="label">작업자 본인 서명 <span className="text-red-500">*</span></label>
+                            <SignaturePad onChange={setJoinSig} />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ③ 장비 */}
+              {addEquip && (
+                <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+                  <p className="text-sm font-bold text-slate-700">🚜 도착 장비</p>
+                  {equipRows.map((r, i) => (
+                    <div key={i} className="flex gap-2 items-center">
+                      <input className="input-base text-sm flex-1 min-w-0" placeholder="종류 * (예: 크레인)" value={r.type}
+                        onChange={(e) => setEquipRows((rows) => rows.map((x, idx) => idx === i ? { ...x, type: e.target.value } : x))} />
+                      <input className="input-base text-sm flex-1 min-w-0" placeholder="차량번호 (선택)" value={r.vehicleNumber}
+                        onChange={(e) => setEquipRows((rows) => rows.map((x, idx) => idx === i ? { ...x, vehicleNumber: e.target.value } : x))} />
+                      {equipRows.length > 1 && (
+                        <button onClick={() => setEquipRows((rows) => rows.filter((_, idx) => idx !== i))} className="text-xs text-red-600 shrink-0">삭제</button>
+                      )}
+                    </div>
+                  ))}
+                  <button onClick={() => setEquipRows((rows) => [...rows, { type: '', vehicleNumber: '' }])} className="btn-secondary w-full text-xs">+ 장비 추가</button>
+                </div>
+              )}
+
+              {/* ④ 현장 사진 — 항상 필수 */}
+              <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+                <p className="text-sm font-bold text-slate-700">📷 현장 사진 <span className="text-red-500">*</span></p>
+                <p className="text-[11px] text-slate-500">사람과 장비가 함께 찍히게 촬영해 주세요.</p>
+                {fieldPhoto && <img src={fieldPhoto} alt="현장 사진" className="w-40 h-24 object-cover rounded border border-slate-200" />}
+                <input ref={addFileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => pickAddPhoto(e.target.files)} />
+                <button onClick={() => addFileRef.current?.click()} className="btn-secondary w-full text-sm">📷 {fieldPhoto ? '사진 다시 촬영' : '사진 촬영'}</button>
+              </div>
+
+              {addMsg && <p className="text-xs text-red-600">{addMsg}</p>}
               <div className="flex gap-2">
-                <button onClick={() => { setArrOpen(false); setArrMsg(''); }} className="btn-secondary flex-1 text-sm">닫기</button>
-                <button onClick={submitArrival} disabled={arrBusy || !arrType.trim() || !arrPhoto} className="btn-primary flex-1 text-sm">
-                  {arrBusy ? '등록 중…' : '+ 도착 등록 (시각 기록)'}
+                <button onClick={resetAddForm} className="btn-secondary flex-1 text-sm">취소</button>
+                <button onClick={submitFieldAdd} disabled={addBusy || (!addWorker && !addEquip) || !fieldPhoto} className="btn-primary flex-1 text-sm">
+                  {addBusy ? '등록 중…' : '현장 추가 등록 (시각 기록)'}
                 </button>
               </div>
             </div>
           )}
         </section>
       )}
-
       <p className="text-[11px] text-slate-400 text-center">
         ※ 계획에 없던 위험작업(중장비 등)을 추가해야 하면 새 허가서를 신청하거나 관리자에게 되돌리기를 요청하세요.
       </p>

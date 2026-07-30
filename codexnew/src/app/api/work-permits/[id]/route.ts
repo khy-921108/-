@@ -26,7 +26,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
        tbm, supplemental, equipment, note, created_at,
        applicant_signature, issuer_title, issuer_signature, approved_by, approved_at,
        approver_name, approver_title, approver_signature, approval_mode, approver_signed_at,
-       completion, dept_confirmations, started_by, started_at, rollback_logs, field_joins, equipment_arrivals`
+       completion, dept_confirmations, started_by, started_at, rollback_logs, field_joins, equipment_arrivals, field_additions`
     )
     .eq('id', ctx.params.id)
     .maybeSingle();
@@ -145,6 +145,26 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     fieldJoinsRaw.map((j: any) => [`${(j?.name ?? '').trim()}||${normalizePhone(j?.phone)}`, j?.joinedAt ?? ''])
   );
 
+  // 현장 추가 등록(통합) — 사진 signed URL + 라벨/시각(별지 사진 시트·print 공용)
+  const additionsRaw: any[] = Array.isArray(permit.field_additions) ? permit.field_additions : [];
+  const fieldAdditions: any[] = [];
+  for (const f of additionsRaw) {
+    let photoUrl: string | null = null;
+    try {
+      if (f?.photo) {
+        const { data: signed } = await supabase.storage.from('work-permit-photos').createSignedUrl(f.photo, 600);
+        photoUrl = signed?.signedUrl ?? null;
+      }
+    } catch { /* */ }
+    fieldAdditions.push({
+      at: f?.at ?? null,
+      actorType: f?.actorType ?? null,
+      workers: Array.isArray(f?.workers) ? f.workers.map((w: any) => ({ name: w?.name ?? '' })) : [], // 전화 미노출
+      equipment: Array.isArray(f?.equipment) ? f.equipment : [],
+      photoUrl,
+    });
+  }
+
   // 1C-2 필수문서 데이터(인쇄 첨부용)
   let docs = null;
   try {
@@ -232,6 +252,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       fieldJoinCount: fieldJoinsRaw.length,
       lastFieldJoinAt: fieldJoinsRaw.length > 0 ? fieldJoinsRaw[fieldJoinsRaw.length - 1]?.joinedAt ?? null : null,
       equipmentArrivals, // [{type, vehicleNumber, at, photoUrl}]
+      fieldAdditions,    // [{at, actorType, workers[], equipment[], photoUrl}] — 현장 추가 등록(사진 별지·print)
       note: permit.note,
       createdAt: permit.created_at,
       docs,

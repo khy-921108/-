@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { SUPPLEMENTAL_WORKS } from '@/lib/work-permit-constants';
 import { STAGE_BADGE_CLASS, type Stage } from '@/lib/work-permit-stage';
@@ -61,6 +61,10 @@ const FRIENDLY_STATUS: Record<string, string> = {
   IN_PROGRESS: '진행 중',
 };
 
+// 본인확인 20분 기억(자동 채움 전용)
+const CRED_KEY = 'wp_my_cred';
+const CRED_TTL_MS = 20 * 60 * 1000;
+
 export default function MyWorkPermits() {
   const router = useRouter();
 
@@ -89,6 +93,27 @@ export default function MyWorkPermits() {
 
   const formatPhone = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 11);
 
+  // 진입 시 20분 이내에 본인확인한 정보가 있으면 자동으로 채운다(만료분은 삭제).
+  // 🔴 서버 검증은 그대로 — 자동 채움일 뿐, 요청마다 3요소를 다시 검증한다.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(CRED_KEY);
+      if (!raw) return;
+      const c = JSON.parse(raw);
+      if (!c?.exp || Date.now() > c.exp) { localStorage.removeItem(CRED_KEY); return; }
+      setName(c.name ?? '');
+      setBirthDate(c.birthDate ?? '');
+      setPhone(c.phone ?? '');
+    } catch { try { localStorage.removeItem(CRED_KEY); } catch { /* */ } }
+  }, []);
+
+  // 본인확인 통과 시점부터 20분간 기억(재입력 방지)
+  const rememberCred = () => {
+    try {
+      localStorage.setItem(CRED_KEY, JSON.stringify({ name: name.trim(), birthDate, phone, exp: Date.now() + CRED_TTL_MS }));
+    } catch { /* */ }
+  };
+
   const search = async (m = month) => {
     setError('');
     if (!name.trim() || !birthDate || phone.length < 10) {
@@ -110,6 +135,7 @@ export default function MyWorkPermits() {
       }
       setItems(json.data.items);
       setPage(1);
+      rememberCred();
     } catch (e) {
       console.error(e);
       setError('네트워크 오류가 발생했습니다.');
@@ -310,14 +336,23 @@ export default function MyWorkPermits() {
                     + 작업자 서명 추가 (2차 확인 전까지)
                   </button>
                 )}
-                {/* 작업 중(개시 후): 소장 직접 종료 신고 */}
+                {/* 작업 중(개시 후): 현장 추가 등록 + 소장 직접 종료 신고
+                    🔴 종료신고 이후(REPORT_WAIT·CLOSED)에는 추가 등록 링크를 노출하지 않는다. */}
                 {it.stage?.key === 'STARTED' && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); openReport(it); }}
-                    className="w-full rounded-lg bg-slate-800 text-white text-sm font-bold py-2 hover:bg-slate-900"
-                  >
-                    🏁 작업 종료 신고
-                  </button>
+                  <>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); goTbm(it.permitId); }}
+                      className="text-xs font-bold text-emerald-700 underline"
+                    >
+                      + 현장 추가 등록 (합류자·장비)
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openReport(it); }}
+                      className="w-full rounded-lg bg-slate-800 text-white text-sm font-bold py-2 hover:bg-slate-900"
+                    >
+                      🏁 작업 종료 신고
+                    </button>
+                  </>
                 )}
                 <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
                   <a

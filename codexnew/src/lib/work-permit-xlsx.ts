@@ -21,7 +21,7 @@ export async function generateWorkPermitXlsx(
        equipment_no, supplemental, equipment, field_joins, equipment_arrivals, note, created_at, tbm,
        applicant_signature, issuer_title, issuer_signature, approved_by, approved_at,
        approver_name, approver_title, approver_signature, approval_mode, approver_signed_at,
-       completion, dept_confirmations`
+       completion, dept_confirmations, field_additions`
     )
     .eq('id', permitId)
     .maybeSingle();
@@ -76,6 +76,27 @@ export async function generateWorkPermitXlsx(
       console.error('[work-permit-xlsx] photo:', e);
     }
   }
+  // 현장 추가 등록(개시 후) — 사진을 base64로 해석해 별지 '1-3' 생성용으로 넘긴다.
+  const fieldAdditions: PermitDocData['fieldAdditions'] = [];
+  for (const f of Array.isArray(permit.field_additions) ? permit.field_additions : []) {
+    let photo: string | null = null;
+    try {
+      if (f?.photo) {
+        const { data: blob, error: dlErr } = await supabase.storage.from('work-permit-photos').download(f.photo);
+        if (!dlErr && blob) photo = `data:image/jpeg;base64,${Buffer.from(await blob.arrayBuffer()).toString('base64')}`;
+      }
+    } catch (e) {
+      console.error('[work-permit-xlsx] field photo:', e);
+    }
+    fieldAdditions.push({
+      at: f?.at ?? '',
+      actorType: f?.actorType === 'ADMIN' ? 'ADMIN' : 'APPLICANT',
+      workerCount: Array.isArray(f?.workers) ? f.workers.length : 0,
+      equipCount: Array.isArray(f?.equipment) ? f.equipment.length : 0,
+      photo,
+    });
+  }
+
   let qrDataUrl: string | null = null;
   try {
     const base = (process.env.NEXT_PUBLIC_SITE_URL || 'https://safety-edu.vercel.app').replace(/\/$/, '');
@@ -157,6 +178,7 @@ export async function generateWorkPermitXlsx(
       confirmations: tbm.confirmations ?? {},
     },
     tbmPhotos,
+    fieldAdditions,
     qrDataUrl,
   };
 

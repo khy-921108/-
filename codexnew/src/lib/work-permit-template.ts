@@ -20,6 +20,8 @@ import type { DocsOutput } from './safety-doc-status';
 export const SHEET_GENERAL = '2_일반위험작업허가서';
 export const SHEET_TBM = '1_TBM(작업전안전미팅)';
 export const SHEET_TBM_PHOTO = '1-2_TBM현장사진';
+/** 작업 개시 후 '현장 추가 등록' 사진 별지 — 추가 등록이 1건 이상일 때만 생성 */
+export const SHEET_TBM_PHOTO_ADD = '1-3_TBM현장사진(추가)';
 export const SHEET_PLEDGE = '8_안전준수서약(개인)';
 export const SHEET_UNDERTAKING = '9_안전작업이행각서(업체)';
 export const SHEET_EDU = '7_교육훈련결과서';
@@ -145,6 +147,14 @@ export interface PermitDocData {
   } | null;
   /** TBM 현장 사진(Storage에서 라우트가 해석한 base64 data URL) */
   tbmPhotos?: string[];
+  /** 작업 개시 후 현장 추가 등록(사진은 라우트가 base64로 해석) */
+  fieldAdditions?: {
+    at: string;
+    actorType: 'APPLICANT' | 'ADMIN';
+    workerCount: number;
+    equipCount: number;
+    photo?: string | null;
+  }[];
   /** 시트2 QR(허가번호+검증 URL) — 라우트가 생성한 PNG data URL */
   qrDataUrl?: string | null;
 }
@@ -780,6 +790,36 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
     tbmPhotosArr.forEach((ph, i) => {
       placeImage(wb, photoSheet, ph, PC.anchors[i], 372, 210, 0.85, 0.2);
     });
+  }
+
+  // ----- 작업 개시 후 '현장 추가 등록' 사진 → 별지 '1-3_TBM현장사진(추가)' -----
+  // 아침 TBM 사진(1-2)은 그대로 두고, 추가 등록이 1건 이상일 때만 같은 구조의 시트를 하나 더 만든다.
+  const addsAll = (data.fieldAdditions ?? []).filter((a) => a && a.photo);
+  if (photoSheet && addsAll.length > 0) {
+    const kstHhmm = (iso?: string) => {
+      if (!iso) return '';
+      const k = new Date(new Date(iso).getTime() + 9 * 3600 * 1000);
+      const p = (n: number) => String(n).padStart(2, '0');
+      return `${p(k.getUTCHours())}:${p(k.getUTCMinutes())}`;
+    };
+    const addSheet = cloneWorksheet(wb, photoSheet, SHEET_TBM_PHOTO_ADD);
+    setCell(addSheet, 'A1', 'TBM 현장사진 (작업 개시 후 현장 추가 등록)');
+    setCell(addSheet, PC.datetime, fmtDateTime(info.workStart));
+    setCell(addSheet, PC.place, info.workLocation);
+    // 라벨 행(A4:I4 / A16:I16)에 "현장 추가 · 11:30 (소장)" 형태로 시각·주체를 적는다.
+    const labelRows = ['A4', 'A16'];
+    addsAll.slice(0, PC.maxPhotos).forEach((a, i) => {
+      const who = a.actorType === 'ADMIN' ? '관리자' : '소장';
+      const what = [a.workerCount > 0 ? `작업자 ${a.workerCount}명` : '', a.equipCount > 0 ? `장비 ${a.equipCount}대` : '']
+        .filter(Boolean).join('·');
+      setCell(addSheet, labelRows[i], `▶ 현장 추가 · ${kstHhmm(a.at)} (${who})${what ? ` — ${what}` : ''}`);
+      placeImage(wb, addSheet, a.photo as string, PC.anchors[i], 372, 210, 0.85, 0.2);
+    });
+    if (addsAll.length > PC.maxPhotos) {
+      setCell(addSheet, 'A28', `※ 현장 추가 등록 ${addsAll.length}건 중 최근 촬영순 ${PC.maxPhotos}건만 이 별지에 표시됩니다. 전체는 인쇄화면·관리자 상세에서 확인하십시오.`);
+    } else {
+      setCell(addSheet, 'A28', '※ 작업 개시 후 현장에서 추가 등록된 인원·장비의 확인 사진입니다.');
+    }
   }
 
   // 기타 특별사항: note + 참여자 초과분 + 장비
