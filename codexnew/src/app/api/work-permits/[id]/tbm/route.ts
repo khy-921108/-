@@ -303,14 +303,34 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   if (action === 'field-add') {
     const addWorker = body?.addWorker === true;
     const addEquipment = body?.addEquipment === true;
+
+    // 멱등성 — 같은 requestId 로 다시 들어오면 새로 등록하지 않고 기존 결과를 그대로 돌려준다.
+    // (네트워크가 끊겨 화면은 실패로 보였지만 서버는 저장됐을 때, 재시도해도 중복되지 않게)
+    const requestId = (body?.requestId ?? '').toString().trim().slice(0, 64);
+    if (requestId) {
+      const dup = (Array.isArray(permit.field_additions) ? permit.field_additions : [])
+        .find((f: any) => f?.requestId === requestId);
+      if (dup) {
+        return NextResponse.json({
+          success: true,
+          data: {
+            added: true, duplicate: true, at: dup.at, actorType: dup.actorType,
+            workerAdded: dup.workers?.[0]?.name ?? null,
+            equipCount: Array.isArray(dup.equipment) ? dup.equipment.length : 0,
+          },
+        });
+      }
+    }
+
     if (!addWorker && !addEquipment) {
       return NextResponse.json({ success: false, code: 'NOTHING_SELECTED', message: '추가할 항목(작업자 합류 / 장비 도착)을 최소 1개 선택해 주세요.' }, { status: 400 });
     }
     if (isSigStr(compTbm.confirmSignature)) {
       return NextResponse.json({ success: false, code: 'ALREADY_CLOSED', message: '종료확인 이후에는 현장 추가 등록을 할 수 없습니다.' }, { status: 409 });
     }
-    if (addWorker && isSigStr(compTbm.workerSignature)) {
-      return NextResponse.json({ success: false, code: 'ALREADY_REPORTED', message: '종료신고 이후에는 작업자를 합류시킬 수 없습니다.' }, { status: 409 });
+    // 종료신고 시점부터 작업자·장비 **모두** 추가 불가(작업이 끝났다고 신고된 뒤의 투입은 기록 모순).
+    if (isSigStr(compTbm.workerSignature)) {
+      return NextResponse.json({ success: false, code: 'ALREADY_REPORTED', message: '종료신고 이후에는 작업자·장비를 추가 등록할 수 없습니다.' }, { status: 409 });
     }
     if (workDayPassed) {
       return NextResponse.json({ success: false, code: 'WORK_DAY_PASSED', message: '작업일이 지난 허가서입니다. 새로 신청해 주세요.' }, { status: 400 });
@@ -405,12 +425,19 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     );
     if (upErr) {
       console.error('[tbm field-add] upload:', upErr);
-      return NextResponse.json({ success: false, code: 'UPLOAD_FAILED', message: '사진 업로드 실패' }, { status: 500 });
+      // 사진이 올라가지 않으면 작업자·장비도 저장하지 않는다(여기서 중단 — 저장된 것 없음).
+      return NextResponse.json(
+        { success: false, code: 'UPLOAD_FAILED', message: '현장 사진을 올리지 못했습니다. 작업자·장비도 등록되지 않았으니 다시 시도해 주세요.' },
+        { status: 500 }
+      );
     }
 
     // 작업자 → 참여자 테이블(전원 서명 판정·출력 자동 포함)
+    // 🔴 부분 실패 방지: 참여자 insert 후 허가서 update 가 실패하면 방금 넣은 참여자를 되돌린다.
+    //    (반쪽 기록이 남아 "이미 명단에 있는 사람" 오류로 재시도조차 막히는 것을 방지)
+    let insertedParticipantId: string | null = null;
     if (addWorker) {
-      const { error: insErr } = await withTimeout(
+      const { data: insRow, error: insErr } = await withTimeout(
         supabase.from('work_permit_participants').insert({
           work_permit_id: permitId,
           session_id: elig.sessionId,
@@ -425,13 +452,17 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
           completed_at: elig.completedAt,
           expires_at: elig.expiresAt,
           sort_order: (parts ?? []).length + 1,
-        }),
+        }).select('id').maybeSingle(),
         'field-participant'
       );
-      if (insErr) {
+      if (insErr || !insRow?.id) {
         console.error('[tbm field-add] participant insert:', insErr);
-        return NextResponse.json({ success: false, code: 'SAVE_FAILED', message: '작업자 저장 실패' }, { status: 500 });
+        return NextResponse.json(
+          { success: false, code: 'SAVE_FAILED', message: '작업자 정보를 저장하지 못했습니다. 등록된 내용이 없으니 다시 시도해 주세요.' },
+          { status: 500 }
+        );
       }
+      insertedParticipantId = insRow.id;
     }
 
     const nextConfs = addWorker
@@ -445,11 +476,12 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
       : arrivals;
     const prevAdditions: any[] = Array.isArray(permit.field_additions) ? permit.field_additions : [];
     const nextAdditions = [...prevAdditions, {
-      at: now, actorType, actor, photo: photoKey,
+      at: now, actorType, actor, photo: photoKey, requestId: requestId || null,
       workers: addWorker ? [{ name: jName, phone: jNorm }] : [],
       equipment: addEquipment ? equipList : [],
     }];
 
+    // 서명·합류·장비·추가기록을 **한 번의 update** 로 함께 쓴다 → 이 중 일부만 저장되는 경우는 없다.
     const { error: saveErr } = await withTimeout(
       supabase.from('work_permits').update({
         tbm: { ...tbm, confirmations: nextConfs },
@@ -461,7 +493,16 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     );
     if (saveErr) {
       console.error('[tbm field-add] save:', saveErr);
-      return NextResponse.json({ success: false, code: 'SAVE_FAILED', message: '현장 추가 기록 저장 실패' }, { status: 500 });
+      // 되돌리기 — 방금 넣은 참여자 삭제(전부 취소). 실패해도 사용자에게는 실패로 알린다.
+      if (insertedParticipantId) {
+        try { await supabase.from('work_permit_participants').delete().eq('id', insertedParticipantId); }
+        catch (e) { console.error('[tbm field-add] rollback participant:', e); }
+      }
+      try { await supabase.storage.from('work-permit-photos').remove([photoKey]); } catch { /* 고아 사진은 무해 */ }
+      return NextResponse.json(
+        { success: false, code: 'SAVE_FAILED', message: '현장 추가 기록을 저장하지 못했습니다. 등록된 내용이 없으니 그대로 다시 시도해 주세요.' },
+        { status: 500 }
+      );
     }
 
     // 소장(APPLICANT) 등록 시에만 관리자 문자(링크 포함) — best-effort

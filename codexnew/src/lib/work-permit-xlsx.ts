@@ -94,6 +94,7 @@ export async function generateWorkPermitXlsx(
       workerCount: Array.isArray(f?.workers) ? f.workers.length : 0,
       equipCount: Array.isArray(f?.equipment) ? f.equipment.length : 0,
       photo,
+      void: f?.void ? { at: f.void.at ?? null, by: f.void.by ?? null, reason: f.void.reason ?? '' } : null,
     });
   }
 
@@ -110,6 +111,7 @@ export async function generateWorkPermitXlsx(
   const smap = await resolveSignerLabels(supabase, [
     permit.approved_by, tbm.witness?.by, comp0.confirmBy, comp0.reportBy,
     ...Object.values(dept0).map((v: any) => v?.by),
+    ...fieldAdditions.map((f) => f.void?.by),
   ]);
   const safeLabel = (v: any): string | null => {
     if (!v) return null;
@@ -118,6 +120,10 @@ export async function generateWorkPermitXlsx(
     return labelFor(smap, s) || null;
   };
   const completionOut = { ...comp0, confirmBy: safeLabel(comp0.confirmBy), reportBy: safeLabel(comp0.reportBy) };
+  // 무효 처리자 이메일 → 이름·직책 표기(별지 【무효】 문구용)
+  for (const f of fieldAdditions) {
+    if (f.void?.by) f.void.by = safeLabel(f.void.by) ?? f.void.by;
+  }
   const deptOut: Record<string, any> = {};
   for (const [k, v] of Object.entries(dept0)) {
     deptOut[k] = { ...(v as any), name: (v as any).name || safeLabel((v as any).by) };

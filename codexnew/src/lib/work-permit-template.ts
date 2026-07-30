@@ -154,6 +154,8 @@ export interface PermitDocData {
     workerCount: number;
     equipCount: number;
     photo?: string | null;
+    /** 무효 처리(정정) — 있으면 별지에 【무효】 로 표시. 원본은 지우지 않는다. */
+    void?: { at: string | null; by: string | null; reason: string } | null;
   }[];
   /** 시트2 QR(허가번호+검증 URL) — 라우트가 생성한 PNG data URL */
   qrDataUrl?: string | null;
@@ -794,7 +796,9 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
 
   // ----- 작업 개시 후 '현장 추가 등록' 사진 → 별지 '1-3_TBM현장사진(추가)' -----
   // 아침 TBM 사진(1-2)은 그대로 두고, 추가 등록이 1건 이상일 때만 같은 구조의 시트를 하나 더 만든다.
-  const addsAll = (data.fieldAdditions ?? []).filter((a) => a && a.photo);
+  // 사진칸이 2개뿐이므로 **유효 기록을 먼저** 배치하고, 남는 칸에 무효 기록을 【무효】로 넣는다.
+  const addsPhoto = (data.fieldAdditions ?? []).filter((a) => a && a.photo);
+  const addsAll = [...addsPhoto.filter((a) => !a.void), ...addsPhoto.filter((a) => !!a.void)];
   if (photoSheet && addsAll.length > 0) {
     const kstHhmm = (iso?: string) => {
       if (!iso) return '';
@@ -812,13 +816,17 @@ export async function fillWorkPermitWorkbook(data: PermitDocData): Promise<Buffe
       const who = a.actorType === 'ADMIN' ? '관리자' : '소장';
       const what = [a.workerCount > 0 ? `작업자 ${a.workerCount}명` : '', a.equipCount > 0 ? `장비 ${a.equipCount}대` : '']
         .filter(Boolean).join('·');
-      setCell(addSheet, labelRows[i], `▶ 현장 추가 · ${kstHhmm(a.at)} (${who})${what ? ` — ${what}` : ''}`);
+      const head = a.void ? '▶ 【무효】 현장 추가' : '▶ 현장 추가';
+      const tail = a.void ? `  ※ 무효: ${a.void.reason}${a.void.by ? ` (${a.void.by})` : ''}` : '';
+      setCell(addSheet, labelRows[i], `${head} · ${kstHhmm(a.at)} (${who})${what ? ` — ${what}` : ''}${tail}`);
       placeImage(wb, addSheet, a.photo as string, PC.anchors[i], 372, 210, 0.85, 0.2);
     });
+    const voidCount = addsAll.filter((a) => a.void).length;
+    const foot = voidCount > 0 ? ` 무효 처리 ${voidCount}건 포함(원본 보존, 【무효】 표시).` : '';
     if (addsAll.length > PC.maxPhotos) {
-      setCell(addSheet, 'A28', `※ 현장 추가 등록 ${addsAll.length}건 중 최근 촬영순 ${PC.maxPhotos}건만 이 별지에 표시됩니다. 전체는 인쇄화면·관리자 상세에서 확인하십시오.`);
+      setCell(addSheet, 'A28', `※ 현장 추가 등록 ${addsAll.length}건 중 유효 기록 우선 ${PC.maxPhotos}건만 이 별지에 표시됩니다. 전체는 인쇄화면·관리자 상세에서 확인하십시오.${foot}`);
     } else {
-      setCell(addSheet, 'A28', '※ 작업 개시 후 현장에서 추가 등록된 인원·장비의 확인 사진입니다.');
+      setCell(addSheet, 'A28', `※ 작업 개시 후 현장에서 추가 등록된 인원·장비의 확인 사진입니다.${foot}`);
     }
   }
 

@@ -62,9 +62,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     });
   }, [router, isLoginPage, expireSession]);
 
-  // 활동 기록 — 화면 이동도 활동으로 본다
-  useEffect(() => { lastActivityRef.current = Date.now(); }, [pathname]);
-
+  // 🔴 활동으로 인정하는 것 = 사용자의 실제 조작뿐(클릭·키입력·스크롤·터치).
+  //    화면의 자동 새로고침·백그라운드 조회·타이머는 여기에 걸리지 않으므로 세션을 연장하지 못한다.
+  //    (자동 갱신되는 화면을 열어둔 채 자리를 비우면 2시간 뒤 그대로 로그아웃된다)
   useEffect(() => {
     if (isLoginPage) return;
     const mark = () => { lastActivityRef.current = Date.now(); };

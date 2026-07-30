@@ -162,6 +162,8 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       workers: Array.isArray(f?.workers) ? f.workers.map((w: any) => ({ name: w?.name ?? '' })) : [], // 전화 미노출
       equipment: Array.isArray(f?.equipment) ? f.equipment : [],
       photoUrl,
+      // 무효 처리(정정) — 원본은 남기고 취소선으로 표시. 관리자만 처리 가능.
+      void: f?.void ? { at: f.void.at ?? null, by: f.void.by ?? null, reason: f.void.reason ?? '' } : null,
     });
   }
 

@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 import { createServiceClient } from './server';
 import type { AdminRole } from '@/lib/admin-permissions';
 import { ADMIN_SESSION_EXPIRED_CODE, ADMIN_SESSION_EXPIRED_MESSAGE } from '@/lib/admin-session';
-import { checkAndTouchAdminActivity } from '@/lib/admin-session-server';
+import { checkAdminActivity } from '@/lib/admin-session-server';
 
 /**
  * 관리자 인증용 Supabase 서버 클라이언트 (쿠키 기반 세션).
@@ -109,8 +109,9 @@ export async function requireAdmin(): Promise<AdminAuthResult> {
   }
 
   // 무활동 자동 로그아웃 — 서버가 최종 판정(클라이언트 타이머 우회 방지).
-  // 통과하면 같은 호출에서 마지막 활동 시각을 갱신하므로, 작업 중에는 계속 연장된다.
-  const { expired } = await checkAndTouchAdminActivity(svc, email, user.last_sign_in_at);
+  // 🔴 여기서는 **판정만** 한다. 세션 연장(활동시각 갱신)은 /api/admin/heartbeat 에서만 일어난다.
+  //    모든 요청이 세션을 연장하면 화면의 자동 새로고침만으로 무한 연장돼 로그아웃이 무력화된다.
+  const { expired } = await checkAdminActivity(svc, email, user.last_sign_in_at);
   if (expired) return sessionExpired();
 
   const admin: AdminRecord = {

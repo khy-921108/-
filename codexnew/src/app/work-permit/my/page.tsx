@@ -65,6 +65,15 @@ const FRIENDLY_STATUS: Record<string, string> = {
 const CRED_KEY = 'wp_my_cred';
 const CRED_TTL_MS = 20 * 60 * 1000;
 
+/** 기억된 정보를 화면에 알릴 때 쓰는 마스킹 — 예) 김○○ · 010-****-1108 */
+function maskCred(name: string, phone: string): string {
+  const n = name.trim();
+  const mName = n ? n[0] + '○'.repeat(Math.max(n.length - 1, 1)) : '';
+  const d = phone.replace(/[^0-9]/g, '');
+  const mPhone = d.length >= 8 ? `${d.slice(0, 3)}-****-${d.slice(-4)}` : '';
+  return [mName, mPhone].filter(Boolean).join(' · ');
+}
+
 export default function MyWorkPermits() {
   const router = useRouter();
 
@@ -84,6 +93,7 @@ export default function MyWorkPermits() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [remembered, setRemembered] = useState(''); // 자동 채움된 정보(마스킹 표시용)
 
   // 작업 종료 신고(소장 직접)
   const [reportFor, setReportFor] = useState<Item | null>(null);
@@ -104,6 +114,7 @@ export default function MyWorkPermits() {
       setName(c.name ?? '');
       setBirthDate(c.birthDate ?? '');
       setPhone(c.phone ?? '');
+      setRemembered(maskCred(c.name ?? '', c.phone ?? ''));
     } catch { try { localStorage.removeItem(CRED_KEY); } catch { /* */ } }
   }, []);
 
@@ -111,6 +122,7 @@ export default function MyWorkPermits() {
   const rememberCred = () => {
     try {
       localStorage.setItem(CRED_KEY, JSON.stringify({ name: name.trim(), birthDate, phone, exp: Date.now() + CRED_TTL_MS }));
+      setRemembered(maskCred(name, phone));
     } catch { /* */ }
   };
 
@@ -232,6 +244,12 @@ export default function MyWorkPermits() {
       </header>
 
       <div className="card space-y-3">
+        {/* 어떤 정보가 이 기기에 남아 있는지 사용자가 알 수 있게 마스킹으로 표시 */}
+        {remembered && (
+          <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-600">
+            🔒 <b>{remembered}</b> · 20분간 기억됨 <span className="text-slate-400">(이 기기에만 저장, 20분 뒤 자동 삭제)</span>
+          </div>
+        )}
         <div>
           <label className="label">성명</label>
           <input className="input-base" value={name} onChange={(e) => setName(e.target.value)} placeholder="홍길동" />

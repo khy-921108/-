@@ -55,7 +55,8 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   }
   const action = body?.action;
   const signature = typeof body?.signature === 'string' ? body.signature : '';
-  const needSig = action !== 'start_work' && action !== 'rollback'; // 되돌리기·개시는 서명 없음
+  // 되돌리기·개시·현장추가 무효처리는 서명 없음
+  const needSig = !['start_work', 'rollback', 'void_field_addition'].includes(action);
   if (needSig && !isValidSignature(signature)) {
     return NextResponse.json({ success: false, code: 'NO_SIGNATURE', message: '서명이 올바르지 않습니다(PNG 서명 필요).' }, { status: 400 });
   }
@@ -75,7 +76,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   const { data: permit, error: readErr } = await withTimeout(
     supabase
       .from('work_permits')
-      .select('id, status, supplemental, issuer_signature, tbm, dept_confirmations, completion, approved_by, started_at, rollback_logs, work_end, equipment')
+      .select('id, status, supplemental, issuer_signature, tbm, dept_confirmations, completion, approved_by, started_at, rollback_logs, work_end, equipment, field_additions')
       .eq('id', ctx.params.id)
       .maybeSingle(),
     'select'
@@ -259,6 +260,40 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     if (error) return fail('UPDATE_FAILED', '저장 실패', 500);
     if (!upd || upd.length === 0) return fail('ALREADY_STARTED', '이미 개시된 허가서입니다(동시 처리).', 409);
     return NextResponse.json({ success: true, data: { action, by: actor, at: now, status: 'APPROVED' } });
+  }
+
+  // ===== 현장 추가 등록 무효 처리(정정) =====
+  //  삭제·덮어쓰기 없음 — 원본 기록은 그대로 두고 void{사유·처리자·시각}만 덧붙인다.
+  //  화면·출력물에는 취소선으로 무효 표시되고, 올바른 내용은 새로 등록한다.
+  //  권한: 관리자(WORKPERMITS_APPROVE)만 — 소장(업체)은 불가. 종료확인 후에는 불가.
+  if (action === 'void_field_addition') {
+    if (!hasApprove) return forbidden();
+    const reason = typeof body?.reason === 'string' ? body.reason.trim() : '';
+    if (!reason) return fail('NO_REASON', '무효 사유를 입력해 주세요.');
+
+    const comp = (permit.completion ?? {}) as Record<string, any>;
+    if (permit.status === 'COMPLETED' || isSig(comp.confirmSignature)) {
+      return fail('ALREADY_CLOSED', '종료확인된 허가서는 현장 추가 기록을 무효 처리할 수 없습니다.', 409);
+    }
+
+    const list: any[] = Array.isArray(permit.field_additions) ? permit.field_additions : [];
+    const idx = Number(body?.index);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= list.length) {
+      return fail('NOT_FOUND', '해당 현장 추가 기록을 찾을 수 없습니다.', 404);
+    }
+    if (list[idx]?.void) {
+      return fail('ALREADY_VOID', '이미 무효 처리된 기록입니다.', 409);
+    }
+
+    const next = list.map((f, i) =>
+      i === idx ? { ...f, void: { at: now, by: actor, reason } } : f
+    );
+    const { error } = await patchPermit({ field_additions: next });
+    if (error) {
+      console.error('[admin/work-permits] void_field_addition:', error);
+      return fail('SAVE_FAILED', '무효 처리를 저장하지 못했습니다.', 500);
+    }
+    return NextResponse.json({ success: true, data: { action, index: idx, by: actor, at: now, reason } });
   }
 
   // ===== 이전 단계로 되돌리기(반려와 별개) =====

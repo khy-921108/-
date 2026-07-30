@@ -80,6 +80,10 @@ export default function SiteTbmPage() {
   // 현장 사진(항상 필수)
   const addFileRef = useRef<HTMLInputElement>(null);
   const [fieldPhoto, setFieldPhoto] = useState('');
+  // 재시도해도 중복 등록되지 않게 하는 요청 식별자(등록 성공/취소 시 초기화)
+  const addReqIdRef = useRef('');
+  // 장비 도착 등록 완료 안내
+  const [equipNotice, setEquipNotice] = useState(false);
 
   const call = useCallback(async (c: Cred, extra: any) => {
     const ac = new AbortController();
@@ -236,6 +240,7 @@ export default function SiteTbmPage() {
     setJoinForm({ name: '', birthDate: '', phone: '' }); setJoinCand(null); setJoinBlocked('');
     setJoinBriefed(false); setJoinSig('');
     setEquipRows([{ type: '', vehicleNumber: '' }]); setFieldPhoto('');
+    addReqIdRef.current = '';
   };
 
   // 통합 등록 제출 — 서버가 동일 검증(사진 필수, 작업자면 서류·서명 필수)
@@ -251,9 +256,17 @@ export default function SiteTbmPage() {
     }
     const equipment = equipRows.map((r) => ({ type: r.type.trim(), vehicleNumber: r.vehicleNumber.trim() })).filter((r) => r.type);
     if (addEquip && equipment.length === 0) { setAddMsg('장비 종류를 입력해 주세요.'); return; }
+
+    // 같은 등록 시도에는 같은 requestId 를 쓴다 → 통신이 끊겨 재시도해도 서버에서 중복 등록되지 않는다.
+    if (!addReqIdRef.current) {
+      addReqIdRef.current = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+    const hadEquip = addEquip;
+
     setAddBusy(true); setAddMsg('');
     const json = await call(cred, {
       action: 'field-add',
+      requestId: addReqIdRef.current,
       addWorker, addEquipment: addEquip,
       image: fieldPhoto,
       joinName: joinForm.name.trim(), joinBirthDate: joinForm.birthDate, joinPhone: joinForm.phone,
@@ -262,8 +275,14 @@ export default function SiteTbmPage() {
       equipment: addEquip ? equipment : [],
     });
     setAddBusy(false);
-    if (!json.success) { setAddMsg(json.message || '등록 실패'); return; }
+    if (!json.success) {
+      // 서버는 "전부 저장" 또는 "전부 취소" 로만 끝난다 — 반쪽 저장은 없으니 그대로 재시도하면 된다.
+      setAddMsg(`${json.message || '등록에 실패했습니다.'} (등록된 내용 없음 — 같은 화면에서 다시 시도하면 중복되지 않습니다)`);
+      return;
+    }
     resetAddForm();
+    // 장비 투입 안내 — 재서명을 강제하지는 않는다
+    if (hadEquip) setEquipNotice(true);
     await loadSession(cred);
   };
 
@@ -396,6 +415,14 @@ export default function SiteTbmPage() {
             {!addOpen && <button onClick={() => setAddOpen(true)} className="btn-primary text-xs px-3 py-1.5 shrink-0 whitespace-nowrap">+ 현장 추가 등록</button>}
           </div>
 
+          {equipNotice && (
+            <div className="rounded-lg bg-amber-50 border border-amber-300 p-3 text-sm text-amber-900 space-y-1">
+              <p>🚜 <b>장비 도착이 등록되었습니다.</b></p>
+              <p className="text-xs">장비 투입으로 위험이 달라졌다면 기존 작업자에게도 변경된 위험·안전대책을 알려주세요.</p>
+              <button onClick={() => setEquipNotice(false)} className="text-xs font-bold underline">확인했습니다</button>
+            </div>
+          )}
+
           {(data.additions ?? []).length > 0 && (
             <ul className="text-xs text-slate-600 space-y-0.5">
               {(data.additions ?? []).map((f: any, i: number) => (
@@ -426,8 +453,8 @@ export default function SiteTbmPage() {
                     ⚠ 장비 운전기사도 안전교육을 받아야 합니다. 기사가 참여자 명단에 없으면 <b>[작업자 합류]</b>도 함께 체크하세요.
                   </p>
                 )}
-                {data.reported && addWorker && (
-                  <p className="text-[11px] text-red-600">※ 종료신고 이후에는 작업자 합류를 등록할 수 없습니다.</p>
+                {data.reported && (
+                  <p className="text-[11px] text-red-600">※ 종료신고 이후에는 작업자·장비를 추가 등록할 수 없습니다.</p>
                 )}
               </div>
 
@@ -540,7 +567,11 @@ export default function SiteTbmPage() {
               {/* ④ 현장 사진 — 항상 필수 */}
               <div className="rounded-lg border border-slate-200 p-3 space-y-2">
                 <p className="text-sm font-bold text-slate-700">📷 현장 사진 <span className="text-red-500">*</span></p>
-                <p className="text-[11px] text-slate-500">사람과 장비가 함께 찍히게 촬영해 주세요.</p>
+                <p className="text-[11px] text-slate-500">
+                  {addEquip
+                    ? '사람과 장비가 함께 찍히게 촬영해 주세요.'
+                    : 'TBM 실시 장면(설명하는 모습)을 촬영해 주세요.'}
+                </p>
                 {fieldPhoto && <img src={fieldPhoto} alt="현장 사진" className="w-40 h-24 object-cover rounded border border-slate-200" />}
                 <input ref={addFileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => pickAddPhoto(e.target.files)} />
                 <button onClick={() => addFileRef.current?.click()} className="btn-secondary w-full text-sm">📷 {fieldPhoto ? '사진 다시 촬영' : '사진 촬영'}</button>

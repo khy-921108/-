@@ -101,6 +101,12 @@ export default function AdminWorkPermitDetailPage() {
   const [rbSaving, setRbSaving] = useState(false);
   const [rbErr, setRbErr] = useState('');
 
+  // 현장 추가 등록 무효 처리(정정)
+  const [voidModal, setVoidModal] = useState<null | { index: number; label: string }>(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [voidSaving, setVoidSaving] = useState(false);
+  const [voidErr, setVoidErr] = useState('');
+
   const load = useCallback(async () => {
     // 읽기(조회)에 15초 클라 타임아웃 — Supabase 지연 시 화면이 매달리지 않게
     const tf = (url: string) => {
@@ -136,6 +142,7 @@ export default function AdminWorkPermitDetailPage() {
   const info = data.info ?? {};
   const equipment: any[] = Array.isArray(data.equipment) ? data.equipment : [];
   const arrivals: any[] = Array.isArray(data.equipmentArrivals) ? data.equipmentArrivals : [];
+  const additions: any[] = Array.isArray(data.fieldAdditions) ? data.fieldAdditions : [];
   const isHeavy = data.supplemental?.heavy === 'Y' || data.supplemental?.excavation === 'Y'; // 장비 관련(중장비·굴착) 공통 조건
   const tbm = data.tbm ?? {};
   const comp = data.completion ?? {};
@@ -279,6 +286,27 @@ export default function AdminWorkPermitDetailPage() {
       ↩ 이전 단계로 되돌리기
     </button>
   );
+  // 현장 추가 등록 무효 처리(정정) — 삭제·덮어쓰기 없이 사유·처리자·시각만 덧붙인다.
+  const submitVoid = async () => {
+    if (!voidModal) return;
+    if (!voidReason.trim()) { setVoidErr('무효 사유를 입력해 주세요.'); return; }
+    setVoidSaving(true); setVoidErr('');
+    try {
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), 20000);
+      const res = await fetch(`/api/admin/work-permits/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'void_field_addition', index: voidModal.index, reason: voidReason.trim() }),
+        signal: ac.signal,
+      }).finally(() => clearTimeout(t));
+      const json = await res.json();
+      if (!json.success) { setVoidErr(json.message || '무효 처리 실패'); setVoidSaving(false); return; }
+      setVoidModal(null); setVoidReason(''); setVoidSaving(false); load();
+    } catch {
+      setVoidErr('저장 지연 또는 네트워크 오류입니다. 잠시 후 다시 시도해 주세요.'); setVoidSaving(false);
+    }
+  };
+
   const submitRollback = async () => {
     if (!rbModal) return;
     if (!rbReason.trim()) { setRbErr('되돌리기 사유를 입력해 주세요.'); return; }
@@ -411,6 +439,38 @@ export default function AdminWorkPermitDetailPage() {
                     <p className="text-[10px] text-slate-400">도착 {fmtDateTime(a.at)}</p>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* 현장 추가 등록 기록 — 무효 처리(정정)는 관리자만, 종료확인 후 불가 */}
+          {additions.length > 0 && (
+            <div>
+              <p className="text-slate-400 text-xs mb-1">현장 추가 등록 ({additions.length})</p>
+              <div className="flex gap-2 flex-wrap">
+                {additions.map((f: any, i: number) => {
+                  const who = f.actorType === 'ADMIN' ? '관리자' : '소장';
+                  const what = [
+                    (f.workers?.length ?? 0) > 0 ? `작업자 ${f.workers.length}명` : '',
+                    (f.equipment?.length ?? 0) > 0 ? `장비 ${f.equipment.length}대` : '',
+                  ].filter(Boolean).join('·');
+                  return (
+                    <div key={i} className={`border rounded p-1.5 w-40 ${f.void ? 'border-red-200 bg-red-50/40' : 'border-slate-200'}`}>
+                      {f.photoUrl
+                        ? <img src={f.photoUrl} alt={`현장 추가 ${i + 1}`} onClick={() => setLightbox(f.photoUrl)}
+                            className={`w-full h-20 object-cover rounded cursor-zoom-in hover:opacity-80 ${f.void ? 'opacity-50' : ''}`} />
+                        : <div className="w-full h-20 bg-slate-100 rounded flex items-center justify-center text-[10px] text-slate-400">사진 없음</div>}
+                      <p className={`text-[11px] font-medium mt-1 ${f.void ? 'line-through text-slate-400' : 'text-slate-700'}`}>{what || '기록'}</p>
+                      <p className={`text-[10px] ${f.void ? 'line-through text-slate-400' : 'text-slate-400'}`}>{fmtDateTime(f.at)} ({who})</p>
+                      {f.void ? (
+                        <p className="text-[10px] text-red-700 font-bold mt-1">【무효】 {f.void.reason}</p>
+                      ) : hasApprove && !closed ? (
+                        <button onClick={() => { setVoidModal({ index: i, label: `${fmtDateTime(f.at)} ${what}` }); setVoidReason(''); setVoidErr(''); }}
+                          className="mt-1 text-[10px] font-bold text-red-600 hover:underline">무효 처리</button>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -675,6 +735,33 @@ export default function AdminWorkPermitDetailPage() {
                 className="whitespace-nowrap text-sm px-5 py-2 rounded-lg font-bold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
                 onClick={submitRollback} disabled={rbSaving}
               >{rbSaving ? '처리 중…' : '되돌리기'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 현장 추가 등록 무효 처리(정정) */}
+      {voidModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !voidSaving && setVoidModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-bold text-red-700">🚫 현장 추가 등록 무효 처리</h3>
+            <p className="text-sm text-slate-600">{voidModal.label}</p>
+            <p className="text-xs text-slate-500">
+              기록은 <b>삭제되지 않습니다</b>. 원본은 그대로 남고 취소선과 함께 무효 사유·처리자·시각이 출력물에 표시됩니다.
+              올바른 내용은 현장에서 <b>새로 등록</b>해 주세요.
+            </p>
+            <div>
+              <label className="label">무효 사유 <span className="text-red-500">*</span></label>
+              <input className="input-base" value={voidReason} onChange={(e) => setVoidReason(e.target.value)}
+                placeholder="예: 장비 종류를 잘못 입력함" />
+            </div>
+            {voidErr && <p className="text-sm text-red-600">{voidErr}</p>}
+            <div className="flex justify-end gap-2 pt-1">
+              <button className="btn-secondary" onClick={() => setVoidModal(null)} disabled={voidSaving}>취소</button>
+              <button
+                className="whitespace-nowrap text-sm px-5 py-2 rounded-lg font-bold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                onClick={submitVoid} disabled={voidSaving}
+              >{voidSaving ? '처리 중…' : '무효 처리'}</button>
             </div>
           </div>
         </div>

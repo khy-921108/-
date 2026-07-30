@@ -212,21 +212,31 @@ export default function WorkPermitPrint({ params }: { params: { id: string } }) 
                 (f.workers?.length ?? 0) > 0 ? `작업자 ${f.workers.length}명` : '',
                 (f.equipment?.length ?? 0) > 0 ? `장비 ${f.equipment.length}대` : '',
               ].filter(Boolean).join('·');
+              // 무효 처리된 기록은 지우지 않고 취소선 + 사유로 표시한다(원본 보존).
+              const voided = !!f.void;
+              const strike: React.CSSProperties = voided
+                ? { textDecoration: 'line-through', opacity: 0.55 }
+                : {};
               return (
                 <div key={i} style={{ textAlign: 'center' }}>
                   {f.photoUrl && (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={f.photoUrl} alt={`현장 추가 ${i + 1}`} className="photo" />
+                    <img src={f.photoUrl} alt={`현장 추가 ${i + 1}`} className="photo" style={voided ? { opacity: 0.45 } : undefined} />
                   )}
-                  <p className="muted" style={{ fontSize: 11 }}>
+                  <p className="muted" style={{ fontSize: 11, ...strike }}>
                     현장 추가 · {fmtDateTime(f.at)} ({who}){what ? ` — ${what}` : ''}
                   </p>
                   {(f.workers?.length ?? 0) > 0 && (
-                    <p className="muted" style={{ fontSize: 11 }}>합류: {f.workers.map((w: any) => w.name).join(', ')}</p>
+                    <p className="muted" style={{ fontSize: 11, ...strike }}>합류: {f.workers.map((w: any) => w.name).join(', ')}</p>
                   )}
                   {(f.equipment?.length ?? 0) > 0 && (
-                    <p className="muted" style={{ fontSize: 11 }}>
+                    <p className="muted" style={{ fontSize: 11, ...strike }}>
                       장비: {f.equipment.map((e: any) => `${e.type}${e.vehicleNumber ? ` ${e.vehicleNumber}` : ''}`).join(', ')}
+                    </p>
+                  )}
+                  {voided && (
+                    <p style={{ fontSize: 11, color: '#b91c1c', fontWeight: 700 }}>
+                      【무효】 {f.void.reason} — {f.void.by} · {fmtDateTime(f.void.at)}
                     </p>
                   )}
                 </div>
