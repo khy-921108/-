@@ -49,9 +49,32 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
 
   // 인증 경로 ①: 관리자 로그인 세션(현장 입회 중 직접 등록) — 3요소 입력 불필요.
   //  ②: 신청인 3요소 일치(업체 경로). 둘 중 하나 통과하면 진행하되, 나머지 규칙은 완전히 동일 적용.
+  //
+  // 🔴 관리자 우회는 아래 액션에만 허용한다.
+  //    photo·confirm·submit 은 **신청인 본인만** — 특히 confirm(참여자 돌려서명)을 관리자가
+  //    대행하면 "누가 서명했는지"가 기록에 남지 않아 서명 체계가 무너진다.
+  const ADMIN_BYPASS_ACTIONS = ['session', 'check-worker', 'field-add'];
   const adminAuth = await requireAdmin();
-  const isAdminSession = adminAuth.ok;
+  // 권한키 확인 — requireAdmin 만으로는 수료현황만 담당하는 관리자도 통과한다.
+  const adminCanApprove =
+    adminAuth.ok && (adminAuth.admin.role === 'SUPER' || (adminAuth.admin.permissions ?? []).includes('WORKPERMITS_APPROVE'));
+  const adminBypassAllowed = adminCanApprove && ADMIN_BYPASS_ACTIONS.includes(action);
+  const isAdminSession = adminBypassAllowed;
   const adminEmail = adminAuth.ok ? adminAuth.admin.email : null;
+
+  // 관리자로 로그인했지만 권한이 없거나 우회 불가 액션인 경우 → 사유를 분명히 알려준다.
+  if (adminAuth.ok && !adminBypassAllowed && (!name || !birthDate || phone.length < 10)) {
+    if (!adminCanApprove) {
+      return NextResponse.json(
+        { success: false, code: 'NO_PERMISSION', message: '작업허가 승인 권한(WORKPERMITS_APPROVE)이 있는 관리자만 현장 화면을 사용할 수 있습니다.' },
+        { status: 403 }
+      );
+    }
+    return NextResponse.json(
+      { success: false, code: 'APPLICANT_ONLY', message: '이 작업은 신청인 본인만 할 수 있습니다. (사진 업로드·참여자 서명·TBM 제출은 대행 불가)' },
+      { status: 403 }
+    );
+  }
 
   if (!isAdminSession && (!name || !birthDate || phone.length < 10)) {
     return NextResponse.json({ success: false, code: 'INVALID_INPUT', message: '본인확인 정보를 정확히 입력해 주세요.' }, { status: 400 });
@@ -141,7 +164,11 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
         applicantName: permit.applicant_name ?? null,
         additions: (Array.isArray(permit.field_additions) ? permit.field_additions : []).map((f: any) => ({
           at: f.at, actorType: f.actorType, workerCount: (f.workers ?? []).length, equipCount: (f.equipment ?? []).length,
+          voided: !!f.void,
         })),
+        // 이미 처리된 등록 요청 식별자 — 통신이 끊긴 뒤 재시도 전에 프론트가 중복 여부를 먼저 확인한다.
+        additionRequestIds: (Array.isArray(permit.field_additions) ? permit.field_additions : [])
+          .map((f: any) => f?.requestId).filter(Boolean),
       },
     });
   }
@@ -324,6 +351,13 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
 
     if (!addWorker && !addEquipment) {
       return NextResponse.json({ success: false, code: 'NOTHING_SELECTED', message: '추가할 항목(작업자 합류 / 장비 도착)을 최소 1개 선택해 주세요.' }, { status: 400 });
+    }
+    // JSONB 무한 증식 방지 — 하루 현장에서 20건을 넘는 추가 등록은 정상 상황이 아니다.
+    if ((Array.isArray(permit.field_additions) ? permit.field_additions : []).length >= 20) {
+      return NextResponse.json(
+        { success: false, code: 'TOO_MANY_ADDITIONS', message: '현장 추가 등록은 허가서당 최대 20건입니다. 안전환경에 문의해 주세요.' },
+        { status: 409 }
+      );
     }
     if (isSigStr(compTbm.confirmSignature)) {
       return NextResponse.json({ success: false, code: 'ALREADY_CLOSED', message: '종료확인 이후에는 현장 추가 등록을 할 수 없습니다.' }, { status: 409 });

@@ -84,10 +84,15 @@ export default function SiteTbmPage() {
   const addReqIdRef = useRef('');
   // 장비 도착 등록 완료 안내
   const [equipNotice, setEquipNotice] = useState(false);
+  // 관리자 모드 여부(세션 만료 안내를 업체 경로와 구분하기 위해 기억)
+  const adminModeRef = useRef(false);
+  const [adminExpired, setAdminExpired] = useState(false);
 
   const call = useCallback(async (c: Cred, extra: any) => {
     const ac = new AbortController();
-    const t = setTimeout(() => ac.abort(), 20000); // 무한 대기 방지
+    // 🔴 서버 maxDuration(30초)보다 길게. 짧으면 서버는 저장 중인데 클라만 끊겨서
+    //    재시도 두 건이 같은 스냅샷을 읽고 중복 등록될 수 있다.
+    const t = setTimeout(() => ac.abort(), 35000);
     try {
       const res = await fetch(`/api/work-permits/${id}/tbm`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -104,9 +109,34 @@ export default function SiteTbmPage() {
   const loadSession = useCallback(async (c: Cred) => {
     setError('');
     const json = await call(c, { action: 'session' });
-    if (!json.success) { setError(json.message || '조회 실패'); setData(null); return false; }
+    if (!json.success) {
+      // 관리자 모드로 쓰던 중 관리자 세션이 끊긴 경우 — "본인확인 정보를 입력하세요"는 오해를 부른다.
+      if (adminModeRef.current) { setAdminExpired(true); setData(null); return false; }
+      setError(json.message || '조회 실패'); setData(null); return false;
+    }
+    if (json.data?.isAdmin) adminModeRef.current = true;
     setCred(c); setData(json.data); return true;
   }, [call]);
+
+  // 관리자 모드일 때는 이 화면에서도 관리자 세션이 살아 있어야 한다.
+  // 실제 조작(클릭·입력·스크롤)이 있었을 때만 heartbeat 를 보낸다 — 관리자 화면과 같은 기준.
+  useEffect(() => {
+    if (!data?.isAdmin) return;
+    let touched = Date.now();
+    let pinged = 0;
+    const mark = () => { touched = Date.now(); };
+    const evs: (keyof WindowEventMap)[] = ['pointerdown', 'keydown', 'wheel', 'touchstart'];
+    evs.forEach((e) => window.addEventListener(e, mark, { passive: true }));
+    const timer = setInterval(async () => {
+      if (touched <= pinged) return;
+      pinged = Date.now();
+      try {
+        const res = await fetch('/api/admin/heartbeat', { method: 'POST' });
+        if (res.status === 401) setAdminExpired(true);
+      } catch { /* 네트워크 오류 무시 */ }
+    }, 60 * 1000);
+    return () => { evs.forEach((e) => window.removeEventListener(e, mark)); clearInterval(timer); };
+  }, [data?.isAdmin]);
 
   // 진입 시: ① 관리자 로그인 세션이면 본인확인 없이 바로 진행(서버가 세션으로 인증)
   //          ② 아니면 sessionStorage 자격 자동 사용(업체 경로)
@@ -274,17 +304,41 @@ export default function SiteTbmPage() {
       signature: addWorker ? joinSig : undefined,
       equipment: addEquip ? equipment : [],
     });
-    setAddBusy(false);
     if (!json.success) {
+      // 통신이 끊겼을 뿐 서버는 저장했을 수 있다 → 재시도 안내 전에 실제 등록 여부를 확인한다.
+      const check = await call(cred, { action: 'session' });
+      const done = check?.success && (check.data?.additionRequestIds ?? []).includes(addReqIdRef.current);
+      setAddBusy(false);
+      if (done) {
+        setData(check.data);
+        resetAddForm();
+        if (hadEquip) setEquipNotice(true);
+        return;
+      }
       // 서버는 "전부 저장" 또는 "전부 취소" 로만 끝난다 — 반쪽 저장은 없으니 그대로 재시도하면 된다.
       setAddMsg(`${json.message || '등록에 실패했습니다.'} (등록된 내용 없음 — 같은 화면에서 다시 시도하면 중복되지 않습니다)`);
       return;
     }
+    setAddBusy(false);
     resetAddForm();
     // 장비 투입 안내 — 재서명을 강제하지는 않는다
     if (hadEquip) setEquipNotice(true);
     await loadSession(cred);
   };
+
+  // ── 관리자 세션 만료(관리자 모드로 들어온 경우) ──
+  if (adminExpired) {
+    return (
+      <main className="space-y-5">
+        <div className="card text-center space-y-3 py-8">
+          <p className="text-3xl">⏱</p>
+          <h1 className="text-lg font-bold text-slate-800">세션이 만료되었습니다</h1>
+          <p className="text-sm text-slate-500">장시간 사용하지 않아 관리자 로그인이 해제되었습니다.<br />다시 로그인해 주세요.</p>
+          <a href="/admin/login?expired=1" className="btn-primary inline-block">관리자 로그인</a>
+        </div>
+      </main>
+    );
+  }
 
   // ── 본인확인 폼 ──
   if (!cred || !data) {
@@ -339,8 +393,11 @@ export default function SiteTbmPage() {
 
       {/* 관리자 로그인으로 들어온 경우 — 본인확인 생략, 나머지 규칙은 업체와 동일 */}
       {data.isAdmin && (
-        <div className="card bg-indigo-50 border border-indigo-200 text-indigo-800 text-sm">
-          🛡 <b>관리자 모드</b>로 접속했습니다. (신청인 {data.applicantName ?? ''} 대신 기록되며, 등록 주체가 <b>관리자</b>로 남습니다)
+        <div className="card bg-indigo-50 border border-indigo-200 text-indigo-800 text-sm space-y-1">
+          <p>🛡 <b>관리자 모드</b>로 접속했습니다. 등록 주체가 <b>관리자</b>로 기록됩니다. (신청인: {data.applicantName ?? '-'})</p>
+          <p className="text-xs">
+            관리자는 <b>현장 추가 등록</b>만 할 수 있습니다. TBM 사진·작업자 서명·제출은 <b>신청인 본인</b>만 가능합니다(대행 불가).
+          </p>
         </div>
       )}
 
@@ -353,16 +410,16 @@ export default function SiteTbmPage() {
         </div>
       )}
 
-      {/* ① 사진 */}
+      {/* ① 사진 — 관리자 모드에서는 대행 불가(서버도 403) */}
       <section className="card space-y-2">
         <h2 className="font-bold text-slate-700">① TBM 현장 사진 <span className="text-xs text-slate-400">({data.photoCount}/{data.maxPhotos})</span></h2>
         <div className="flex gap-2 flex-wrap">
           {previews.map((p, i) => <img key={i} src={p} alt={`사진${i + 1}`} className="w-24 h-14 object-cover rounded border border-slate-200" />)}
         </div>
         <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => addPhoto(e.target.files)} />
-        <button onClick={() => fileRef.current?.click()} disabled={busy || data.photoCount >= data.maxPhotos || data.witnessConfirmed}
-          className={`w-full rounded-lg py-2 text-sm font-bold ${data.photoCount >= data.maxPhotos || data.witnessConfirmed ? 'bg-slate-100 text-slate-400' : 'btn-secondary'}`}>
-          📷 {data.witnessConfirmed ? '확인 완료(수정 불가)' : data.photoCount >= data.maxPhotos ? '사진 2장 완료' : '사진 촬영/선택'}
+        <button onClick={() => fileRef.current?.click()} disabled={busy || data.isAdmin || data.photoCount >= data.maxPhotos || data.witnessConfirmed}
+          className={`w-full rounded-lg py-2 text-sm font-bold ${data.isAdmin || data.photoCount >= data.maxPhotos || data.witnessConfirmed ? 'bg-slate-100 text-slate-400' : 'btn-secondary'}`}>
+          📷 {data.isAdmin ? '신청인 본인만 가능' : data.witnessConfirmed ? '확인 완료(수정 불가)' : data.photoCount >= data.maxPhotos ? '사진 2장 완료' : '사진 촬영/선택'}
         </button>
       </section>
 
@@ -381,8 +438,8 @@ export default function SiteTbmPage() {
                 <p className="text-[11px] text-slate-400">{r.companyName}</p>
               </div>
               {r.confirmed ? (
-                <span className="text-xs font-bold text-emerald-600">✅ 서명완료 {!data.witnessConfirmed && <button onClick={() => setSignFor(r.name)} className="ml-1 text-slate-400 underline">재서명</button>}</span>
-              ) : data.witnessConfirmed ? (
+                <span className="text-xs font-bold text-emerald-600">✅ 서명완료 {!data.witnessConfirmed && !data.isAdmin && <button onClick={() => setSignFor(r.name)} className="ml-1 text-slate-400 underline">재서명</button>}</span>
+              ) : (data.witnessConfirmed || data.isAdmin) ? (
                 <span className="text-xs text-slate-400">미서명</span>
               ) : (
                 <button onClick={() => { setSig(''); setSignFor(r.name); }} className="btn-primary text-xs px-3 py-1.5">서명</button>
@@ -393,7 +450,7 @@ export default function SiteTbmPage() {
       </section>
 
       {/* 제출 */}
-      {!data.witnessConfirmed && (
+      {!data.witnessConfirmed && !data.isAdmin && (
         <section className="card space-y-2">
           <button onClick={submitTbm} disabled={busy || data.tbmSubmitted || (data.photoCount === 0 && confirmedCount === 0)}
             className={`w-full rounded-lg py-3 font-bold ${data.tbmSubmitted || (data.photoCount === 0 && confirmedCount === 0) ? 'bg-slate-100 text-slate-400' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>

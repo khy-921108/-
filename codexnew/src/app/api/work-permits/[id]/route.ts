@@ -74,6 +74,8 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     compObj.confirmBy,
     ...Object.values(deptObj).map((v: any) => v?.by),
     ...rollbackLogsRaw.map((l: any) => l?.by),
+    // 현장 추가 등록 무효 처리자 — 이메일 원문이 공개 응답·인쇄화면에 나가지 않게 라벨 변환 대상에 포함
+    ...(Array.isArray(permit.field_additions) ? permit.field_additions : []).map((f: any) => f?.void?.by),
   ];
   const signerLabelMap = await resolveSignerLabels(supabase, signerEmails);
   // 표시명 변환기(공개 응답에 이메일 원문 노출 금지 — 등록명 or 이메일 앞부분)
@@ -163,7 +165,8 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
       equipment: Array.isArray(f?.equipment) ? f.equipment : [],
       photoUrl,
       // 무효 처리(정정) — 원본은 남기고 취소선으로 표시. 관리자만 처리 가능.
-      void: f?.void ? { at: f.void.at ?? null, by: f.void.by ?? null, reason: f.void.reason ?? '' } : null,
+      // 처리자는 라벨(부서·이름·직책)로만 — 이메일 원문 미노출. 미등록 계정이면 "(정보 미등록)".
+      void: f?.void ? { at: f.void.at ?? null, by: lab(f.void.by) ?? '(정보 미등록)', reason: f.void.reason ?? '' } : null,
     });
   }
 

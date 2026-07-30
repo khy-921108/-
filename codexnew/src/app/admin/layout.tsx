@@ -93,6 +93,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }, [isLoginPage, expireSession]);
 
   const logout = async () => {
+    // 서버의 활동 기록을 먼저 지운 뒤 signOut(순서 반대면 인증이 끊겨 정리하지 못한다)
+    try { await fetch('/api/admin/logout', { method: 'POST' }); } catch { /* 정리 실패는 무시 */ }
     const supabase = createClient();
     await supabase.auth.signOut();
     router.push('/admin/login');
