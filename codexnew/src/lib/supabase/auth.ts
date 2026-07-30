@@ -3,6 +3,8 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 import { createServiceClient } from './server';
 import type { AdminRole } from '@/lib/admin-permissions';
+import { ADMIN_SESSION_EXPIRED_CODE, ADMIN_SESSION_EXPIRED_MESSAGE } from '@/lib/admin-session';
+import { checkAndTouchAdminActivity } from '@/lib/admin-session-server';
 
 /**
  * 관리자 인증용 Supabase 서버 클라이언트 (쿠키 기반 세션).
@@ -59,6 +61,15 @@ function unauthorized(message = '관리자 로그인이 필요합니다.'): Admi
     response: NextResponse.json({ success: false, code: 'UNAUTHORIZED', message }, { status: 401 }),
   };
 }
+function sessionExpired(): AdminAuthFail {
+  return {
+    ok: false,
+    response: NextResponse.json(
+      { success: false, code: ADMIN_SESSION_EXPIRED_CODE, message: ADMIN_SESSION_EXPIRED_MESSAGE },
+      { status: 401 }
+    ),
+  };
+}
 function forbidden(message = '이 기능에 대한 권한이 없습니다.'): AdminAuthFail {
   return {
     ok: false,
@@ -96,6 +107,11 @@ export async function requireAdmin(): Promise<AdminAuthResult> {
   if (!row || !row.is_active) {
     return unauthorized('등록된 관리자 계정이 아닙니다.');
   }
+
+  // 무활동 자동 로그아웃 — 서버가 최종 판정(클라이언트 타이머 우회 방지).
+  // 통과하면 같은 호출에서 마지막 활동 시각을 갱신하므로, 작업 중에는 계속 연장된다.
+  const { expired } = await checkAndTouchAdminActivity(svc, email, user.last_sign_in_at);
+  if (expired) return sessionExpired();
 
   const admin: AdminRecord = {
     id: row.id,

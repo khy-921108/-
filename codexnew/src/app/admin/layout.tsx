@@ -2,8 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import {
+  ADMIN_HEARTBEAT_INTERVAL_MS,
+  ADMIN_IDLE_TIMEOUT_MS,
+  ADMIN_SESSION_EXPIRED_CODE,
+} from '@/lib/admin-session';
 
 interface MeData {
   email: string;
@@ -21,6 +26,19 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const isLoginPage = pathname === '/admin/login';
 
+  // ── 무활동 자동 로그아웃(2시간) — 상수는 lib/admin-session.ts 한 곳 ──
+  // 클라이언트는 "편의"만 담당하고, 최종 판정은 서버(requireAdmin)가 한다.
+  const lastActivityRef = useRef(Date.now());
+  const lastPingRef = useRef(0);
+
+  const expireSession = useCallback(async () => {
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+    } catch { /* */ }
+    router.replace('/admin/login?expired=1');
+  }, [router]);
+
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(async ({ data }) => {
@@ -34,6 +52,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           const res = await fetch('/api/admin/me');
           const json = await res.json();
           if (json.success) setMe(json.data);
+          else if (json.code === ADMIN_SESSION_EXPIRED_CODE) { await expireSession(); return; }
           else setDenied(true); // 로그인은 됐으나 허용목록에 없음
         } catch {
           setDenied(true);
@@ -41,7 +60,37 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       }
       setChecked(true);
     });
-  }, [router, isLoginPage]);
+  }, [router, isLoginPage, expireSession]);
+
+  // 활동 기록 — 화면 이동도 활동으로 본다
+  useEffect(() => { lastActivityRef.current = Date.now(); }, [pathname]);
+
+  useEffect(() => {
+    if (isLoginPage) return;
+    const mark = () => { lastActivityRef.current = Date.now(); };
+    const events: (keyof WindowEventMap)[] = ['pointerdown', 'keydown', 'wheel', 'touchstart'];
+    events.forEach((e) => window.addEventListener(e, mark, { passive: true }));
+
+    const timer = setInterval(async () => {
+      const idle = Date.now() - lastActivityRef.current;
+      if (idle > ADMIN_IDLE_TIMEOUT_MS) { await expireSession(); return; }
+      // 마지막 확인 이후 실제 활동이 있었을 때만 서버 활동시각을 갱신한다
+      if (lastActivityRef.current <= lastPingRef.current) return;
+      lastPingRef.current = Date.now();
+      try {
+        const res = await fetch('/api/admin/heartbeat', { method: 'POST' });
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          if (json?.code === ADMIN_SESSION_EXPIRED_CODE) await expireSession();
+        }
+      } catch { /* 네트워크 오류는 무시 — 서버가 최종 판정 */ }
+    }, ADMIN_HEARTBEAT_INTERVAL_MS);
+
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, mark));
+      clearInterval(timer);
+    };
+  }, [isLoginPage, expireSession]);
 
   const logout = async () => {
     const supabase = createClient();

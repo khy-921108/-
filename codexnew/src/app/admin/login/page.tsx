@@ -1,11 +1,21 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { ADMIN_IDLE_LABEL, ADMIN_SESSION_EXPIRED_MESSAGE } from '@/lib/admin-session';
 
 export default function AdminLoginPage() {
+  return (
+    <Suspense fallback={<div className="py-10 text-center text-slate-500">불러오는 중...</div>}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
+  const expired = useSearchParams().get('expired') === '1';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -37,6 +47,11 @@ export default function AdminLoginPage() {
           <div className="text-3xl">🛡️</div>
           <h1 className="mt-2 text-xl font-bold text-slate-800">관리자 로그인</h1>
         </div>
+        {expired && (
+          <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+            ⏱ {ADMIN_SESSION_EXPIRED_MESSAGE}
+          </div>
+        )}
         <div className="space-y-3">
           <div>
             <label className="label">이메일</label>
@@ -65,7 +80,8 @@ export default function AdminLoginPage() {
           {loading ? '로그인 중...' : '로그인'}
         </button>
         <p className="text-xs text-slate-500 text-center">
-          Supabase Authentication에 등록된 계정으로 로그인하세요.
+          Supabase Authentication에 등록된 계정으로 로그인하세요.<br />
+          {ADMIN_IDLE_LABEL} 동안 사용하지 않으면 자동으로 로그아웃됩니다.
         </p>
       </div>
     </main>
