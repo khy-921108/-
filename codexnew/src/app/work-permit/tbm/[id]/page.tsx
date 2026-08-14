@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import SignaturePad from '@/components/SignaturePad';
 import { PLEDGE_INTRO, PLEDGE_CLAUSES } from '@/lib/work-permit-constants';
+import { writeSharedActivity } from '@/lib/admin-session';
 
 interface Cred { name: string; birthDate: string; phone: string }
 interface RosterItem { name: string; companyName: string; confirmed: boolean }
@@ -124,9 +125,15 @@ export default function SiteTbmPage() {
     if (!data?.isAdmin) return;
     let touched = Date.now();
     let pinged = 0;
-    const mark = () => { touched = Date.now(); };
+    let written = 0;
+    // 관리자 화면들과 같은 공유 기록을 쓴다 — 여기서 작업 중이면 다른 관리자 탭도 로그아웃되지 않는다.
+    const mark = () => {
+      touched = Date.now();
+      if (touched - written > 5000) { written = touched; writeSharedActivity(touched); }
+    };
     const evs: (keyof WindowEventMap)[] = ['pointerdown', 'keydown', 'wheel', 'touchstart'];
     evs.forEach((e) => window.addEventListener(e, mark, { passive: true }));
+    writeSharedActivity();
     const timer = setInterval(async () => {
       if (touched <= pinged) return;
       pinged = Date.now();

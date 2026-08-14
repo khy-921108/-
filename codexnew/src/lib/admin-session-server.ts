@@ -101,6 +101,20 @@ export async function touchAdminActivity(
   return { expired: false };
 }
 
+/**
+ * 만료까지 남은 시간(ms). **갱신하지 않는다** — 클라이언트가 "아직 유효한가"만 물어볼 때 쓴다.
+ * 기록이 없으면 전체 시간이 남은 것으로 본다(requireAdmin 이 이미 만료 판정을 통과한 뒤이므로 안전).
+ */
+export async function adminIdleRemainingMs(
+  supabase: SupabaseClient,
+  email: string,
+  lastSignInAt?: string | null
+): Promise<number> {
+  const last = await effectiveLastSeen(supabase, seenKey(email), lastSignInAt);
+  if (last === null) return ADMIN_IDLE_TIMEOUT_MS;
+  return Math.max(0, ADMIN_IDLE_TIMEOUT_MS - (Date.now() - last));
+}
+
 /** 로그아웃 시 활동 기록 제거(다음 로그인은 새 창으로 시작) */
 export async function clearAdminActivity(supabase: SupabaseClient, email: string): Promise<void> {
   try {

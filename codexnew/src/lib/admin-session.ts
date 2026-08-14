@@ -23,3 +23,29 @@ export const ADMIN_SESSION_EXPIRED_CODE = 'SESSION_EXPIRED';
 
 /** 클라이언트 활동 감시 주기(ms) — 이 간격으로 만료 확인 + 서버 활동시각 갱신 */
 export const ADMIN_HEARTBEAT_INTERVAL_MS = 60 * 1000;
+
+// ──────────────────────────────────────────────────────────────
+// 탭 간 활동시각 공유 (클라이언트 전용)
+//
+// 🔴 탭마다 자기 화면의 활동만 보고 판정하면, 방치된 탭 하나가 작업 중인 탭까지
+//    로그아웃시킨다(signOut 은 브라우저 전체 세션을 지우기 때문). 그래서 마지막 조작 시각을
+//    localStorage 로 공유해 **어느 탭에서 조작하든 모든 탭이 같은 값을 본다.**
+//    활동으로 인정하는 범위는 그대로 — 사용자의 실제 조작(클릭·키입력·스크롤·터치)뿐이고
+//    자동 폴링·백그라운드 조회는 여기에 기록되지 않는다.
+// ──────────────────────────────────────────────────────────────
+
+/** 탭 간 공유 활동시각 저장 키 */
+export const ADMIN_ACTIVITY_KEY = 'wp_admin_activity';
+
+/** 공유 활동시각 기록(쓰기 폭주 방지를 위해 호출부에서 5초 정도 간격을 둔다) */
+export function writeSharedActivity(ts: number = Date.now()): void {
+  try { localStorage.setItem(ADMIN_ACTIVITY_KEY, String(ts)); } catch { /* 프라이빗 모드 등 */ }
+}
+
+/** 공유 활동시각 읽기 — 없으면 0(호출부에서 자기 탭 값과 max 로 합친다) */
+export function readSharedActivity(): number {
+  try {
+    const v = Number(localStorage.getItem(ADMIN_ACTIVITY_KEY));
+    return Number.isFinite(v) ? v : 0;
+  } catch { return 0; }
+}

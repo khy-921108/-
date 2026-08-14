@@ -8,6 +8,9 @@ import {
   ADMIN_HEARTBEAT_INTERVAL_MS,
   ADMIN_IDLE_TIMEOUT_MS,
   ADMIN_SESSION_EXPIRED_CODE,
+  ADMIN_ACTIVITY_KEY,
+  readSharedActivity,
+  writeSharedActivity,
 } from '@/lib/admin-session';
 
 interface MeData {
@@ -30,14 +33,47 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   // 클라이언트는 "편의"만 담당하고, 최종 판정은 서버(requireAdmin)가 한다.
   const lastActivityRef = useRef(Date.now());
   const lastPingRef = useRef(0);
+  const lastWriteRef = useRef(0);   // 공유 활동시각 쓰기 스로틀
+  const expiringRef = useRef(false); // 만료 처리 중복 방지
 
   const expireSession = useCallback(async () => {
+    if (expiringRef.current) return;
+    expiringRef.current = true;
     try {
       const supabase = createClient();
       await supabase.auth.signOut();
     } catch { /* */ }
     router.replace('/admin/login?expired=1');
   }, [router]);
+
+  /**
+   * 🔴 로컬 타이머만 보고 로그아웃하지 않는다.
+   *    signOut 은 브라우저 전체 세션을 지우므로, 방치된 탭 하나가 작업 중인 탭까지 끊어버린다.
+   *    로컬에서 만료로 보이면 서버에 확인하고, **서버가 만료라고 할 때만** 로그아웃한다.
+   * @returns 계속 사용해도 되면 true(로컬 타이머를 서버 기준으로 맞춘 상태)
+   */
+  const confirmWithServer = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/admin/heartbeat', { cache: 'no-store' });
+      if (res.status === 401) {
+        const json = await res.json().catch(() => ({}));
+        if (json?.code === ADMIN_SESSION_EXPIRED_CODE) { await expireSession(); return false; }
+        return true; // 다른 이유의 401 은 여기서 판단하지 않는다(로그인 흐름이 처리)
+      }
+      const json = await res.json().catch(() => null);
+      if (json?.success) {
+        // 서버가 아직 유효하다고 함 → 다른 탭이 세션을 유지 중. 로컬 타이머를 서버 기준으로 재설정.
+        const remaining = Number(json.data?.remainingMs);
+        const synced = Number.isFinite(remaining)
+          ? Date.now() - (ADMIN_IDLE_TIMEOUT_MS - remaining)
+          : Date.now();
+        lastActivityRef.current = Math.max(lastActivityRef.current, synced);
+      }
+      return true;
+    } catch {
+      return true; // 네트워크 오류로 사용자를 쫓아내지 않는다 — 다음 주기에 다시 확인
+    }
+  }, [expireSession]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -67,14 +103,25 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   //    (자동 갱신되는 화면을 열어둔 채 자리를 비우면 2시간 뒤 그대로 로그아웃된다)
   useEffect(() => {
     if (isLoginPage) return;
-    const mark = () => { lastActivityRef.current = Date.now(); };
+    // 조작이 있으면 자기 탭 기록 + 다른 탭도 볼 수 있게 공유 기록(5초 스로틀)
+    const mark = () => {
+      const now = Date.now();
+      lastActivityRef.current = now;
+      if (now - lastWriteRef.current > 5000) { lastWriteRef.current = now; writeSharedActivity(now); }
+    };
     const events: (keyof WindowEventMap)[] = ['pointerdown', 'keydown', 'wheel', 'touchstart'];
     events.forEach((e) => window.addEventListener(e, mark, { passive: true }));
+    writeSharedActivity(); // 화면을 연 시점도 조작으로 본다(다른 탭과 출발선 맞추기)
 
     const timer = setInterval(async () => {
-      const idle = Date.now() - lastActivityRef.current;
-      if (idle > ADMIN_IDLE_TIMEOUT_MS) { await expireSession(); return; }
-      // 마지막 확인 이후 실제 활동이 있었을 때만 서버 활동시각을 갱신한다
+      // 판정은 **모든 탭을 합친 활동시각**으로 — 다른 탭에서 작업 중이면 이 탭도 살아 있다.
+      const shared = Math.max(lastActivityRef.current, readSharedActivity());
+      if (Date.now() - shared > ADMIN_IDLE_TIMEOUT_MS) {
+        // 로컬 판정만으로 로그아웃하지 않는다. 서버가 만료라고 할 때만 끊는다.
+        await confirmWithServer();
+        return;
+      }
+      // 서버 활동시각 갱신(연장)은 **이 탭에서 실제 조작이 있었을 때만** — 방치 탭은 연장하지 않는다.
       if (lastActivityRef.current <= lastPingRef.current) return;
       lastPingRef.current = Date.now();
       try {
@@ -90,11 +137,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       events.forEach((e) => window.removeEventListener(e, mark));
       clearInterval(timer);
     };
-  }, [isLoginPage, expireSession]);
+  }, [isLoginPage, expireSession, confirmWithServer]);
 
   const logout = async () => {
     // 서버의 활동 기록을 먼저 지운 뒤 signOut(순서 반대면 인증이 끊겨 정리하지 못한다)
     try { await fetch('/api/admin/logout', { method: 'POST' }); } catch { /* 정리 실패는 무시 */ }
+    try { localStorage.removeItem(ADMIN_ACTIVITY_KEY); } catch { /* */ }
     const supabase = createClient();
     await supabase.auth.signOut();
     router.push('/admin/login');
