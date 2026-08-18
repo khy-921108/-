@@ -31,7 +31,7 @@ export async function GET() {
   const auth = await requireAdmin();
   if (!auth.ok) return auth.response; // 만료면 401 SESSION_EXPIRED
 
-  const remainingMs = await adminIdleRemainingMs(createServiceClient(), auth.admin.email, undefined);
+  const remainingMs = await adminIdleRemainingMs(createServiceClient(), auth.admin.email, auth.user.lastSignInAt);
   return NextResponse.json({ success: true, data: { valid: true, remainingMs, idleTimeoutMs: ADMIN_IDLE_TIMEOUT_MS } });
 }
 
@@ -40,7 +40,7 @@ export async function POST() {
   if (!auth.ok) return auth.response;
 
   const svc = createServiceClient();
-  const { expired } = await touchAdminActivity(svc, auth.admin.email, undefined);
+  const { expired } = await touchAdminActivity(svc, auth.admin.email, auth.user.lastSignInAt);
   if (expired) {
     return NextResponse.json(
       { success: false, code: ADMIN_SESSION_EXPIRED_CODE, message: ADMIN_SESSION_EXPIRED_MESSAGE },

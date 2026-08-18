@@ -51,7 +51,7 @@ export interface AdminRecord {
   signature: string | null;
 }
 
-export type AdminAuthOk = { ok: true; user: { id: string; email: string }; admin: AdminRecord };
+export type AdminAuthOk = { ok: true; user: { id: string; email: string; lastSignInAt: string | null }; admin: AdminRecord };
 export type AdminAuthFail = { ok: false; response: NextResponse };
 export type AdminAuthResult = AdminAuthOk | AdminAuthFail;
 
@@ -126,7 +126,7 @@ export async function requireAdmin(): Promise<AdminAuthResult> {
     department: row.department ?? null,
     signature: row.signature ?? null,
   };
-  return { ok: true, user: { id: user.id, email }, admin };
+  return { ok: true, user: { id: user.id, email, lastSignInAt: user.last_sign_in_at ?? null }, admin };
 }
 
 /** SUPER 전용. */

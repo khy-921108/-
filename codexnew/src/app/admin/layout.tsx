@@ -63,8 +63,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       const json = await res.json().catch(() => null);
       if (json?.success) {
         // 서버가 아직 유효하다고 함 → 다른 탭이 세션을 유지 중. 로컬 타이머를 서버 기준으로 재설정.
+        // remaining 이 0 이하로 와도(서버는 유효하다고 판단) 타이머를 과거로 되돌리지 않는다.
+        // 되돌리면 다음 주기마다 다시 서버에 묻는 상태가 반복된다.
         const remaining = Number(json.data?.remainingMs);
-        const synced = Number.isFinite(remaining)
+        const synced = Number.isFinite(remaining) && remaining > 0
           ? Date.now() - (ADMIN_IDLE_TIMEOUT_MS - remaining)
           : Date.now();
         lastActivityRef.current = Math.max(lastActivityRef.current, synced);
