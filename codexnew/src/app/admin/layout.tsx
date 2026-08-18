@@ -29,7 +29,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const isLoginPage = pathname === '/admin/login';
 
-  // ── 무활동 자동 로그아웃(2시간) — 상수는 lib/admin-session.ts 한 곳 ──
+  // ── 무활동 자동 로그아웃 — 기준 시간은 lib/admin-session.ts 의 ADMIN_IDLE_TIMEOUT_MS 한 곳 ──
   // 클라이언트는 "편의"만 담당하고, 최종 판정은 서버(requireAdmin)가 한다.
   const lastActivityRef = useRef(Date.now());
   const lastPingRef = useRef(0);
@@ -100,7 +100,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   // 🔴 활동으로 인정하는 것 = 사용자의 실제 조작뿐(클릭·키입력·스크롤·터치).
   //    화면의 자동 새로고침·백그라운드 조회·타이머는 여기에 걸리지 않으므로 세션을 연장하지 못한다.
-  //    (자동 갱신되는 화면을 열어둔 채 자리를 비우면 2시간 뒤 그대로 로그아웃된다)
+  //    (자동 갱신되는 화면을 열어둔 채 자리를 비우면 기준 시간 뒤 그대로 로그아웃된다)
   useEffect(() => {
     if (isLoginPage) return;
     // 조작이 있으면 자기 탭 기록 + 다른 탭도 볼 수 있게 공유 기록(5초 스로틀)
