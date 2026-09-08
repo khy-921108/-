@@ -1,8 +1,19 @@
 # Claude–GPT Bridge (B-2: Codex CLI + 래퍼) — 전체 설계 문서
 
-- 상태: 설계만 완료, 코드 미작성 (v0.2, 2026-09-08). v0.1(API 키 방식)은 폐기.
-- 인터랙티브 설계도: 아티팩트 "Claude–GPT Bridge 설계도"
+- 상태: **codex-bridge 구현 완료, pytest 74건 통과** (v0.3, 2026-09-08). v0.1(API 키 방식)은 폐기.
+- 인터랙티브 설계도: 아티팩트 "Claude–GPT Bridge 설계도" (구조·흐름은 이 문서와 동일하게 유지, 값 위주 갱신은 생략)
 - 교차검토용 체크리스트: `CROSS_CHECK.md`
+- 코드: `../codex-bridge/` · 설치·실행: `../codex-bridge/README.md`
+- 스킬 초안: `../skill/gpt-check/SKILL.md` (더 이상 "초안" 아님 — `prompts.py`가 이 파일을 그대로 파싱해서 씀)
+
+### 구현 범위와 남은 미확인 항목
+
+아래 표의 "확인된 사실"은 전부 이 구현에 실제로 반영·테스트되었다(가짜 `codex` CLI로 74건 pytest,
+그리고 실제 `mcp` SDK로 stdio JSON-RPC까지 왕복 검증). **단 하나, 진짜 ChatGPT 계정으로 진짜 GPT 응답을
+받는 왕복만은 이 환경에 로그인이 없어 검증하지 못했다.** 그래서 `codex_runner._extract_message_from_events`는
+`-o` 파일이 비어 있을 때만 쓰이는 방어적 폴백으로 남겨뒀다 — 실제 이벤트 스트림에 에이전트 메시지가
+어떤 `type`으로 오는지는 여전히 추정이다. §10 "구현 순서"의 1번(로그인 후 왕복 확인)이 사용자 쪽에서
+해야 할 유일한 남은 단계다.
 
 ## 0. 확인된 사실과 설계 전제
 
@@ -336,16 +347,21 @@ classify_failure(result) -> grade      # limit_hit→3, timeout→3, exit≠0→
 | 4 안전 | ⚠️ mcp-server 폐기 → 래퍼는 exec만 의존 | 반영 |
 | 1~4 | ✅ 순환 의존·단일 책임·하드코딩·체크포인트 위치·무한루프·파일 손상 방지·비밀 보호 | 통과 |
 
-## 10. 구현 순서 제안
+## 10. 구현 순서 (완료 현황)
 
-1. Codex 설치·로그인, 경로 A 등록 한 줄 → 스킬 초안으로 검산 왕복이 실제로 되는지 확인 (미확인 항목 해소)
-2. 스킬 gpt-check 완성 (역할 지시 3종, 보고 형식)
-3. 래퍼: config + validator.preflight + logger (서버가 뜨는지)
-4. codex_runner + gpt_ask (exec 왕복, JSONL 파싱, 타임아웃, 한도 문구)
-5. session_map + gpt_debate (resume, 잠금, 라운드)
-6. gpt_cross_check → gpt_review (--output-schema, 2차 검증)
-7. gpt_status / gpt_session
-8. 실패 시나리오 테스트: 미로그인 / 한도 도달 문구 / 타임아웃 / 병렬 같은 세션 / 저장 중 강제 종료 / Windows 경로·인코딩
+| # | 항목 | 상태 |
+|---|---|---|
+| 1 | Codex 설치·로그인 후 검산 왕복이 실제로 되는지 확인 | **남은 유일한 단계 — 사용자 PC에서 `codex login` 후 확인 필요.** 이 개발 환경엔 ChatGPT 로그인·네트워크 egress가 없어 진짜 왕복은 못 했다. |
+| 2 | 스킬 gpt-check 완성 (역할 지시 4종: ask·cross_check·review·debate, 보고 형식) | 완료 — `skill/gpt-check/SKILL.md` |
+| 3 | 래퍼: config + validator.preflight + logger | 완료 — `core/config.py`, `core/validator.py`, `core/logger.py` |
+| 4 | codex_runner + gpt_ask (exec 왕복, JSONL 파싱, 타임아웃, 한도 문구) | 완료 — `core/codex_runner.py`, `tools/ask.py`. 타임아웃 시 프로세스 트리 강제 종료까지 테스트로 확인 |
+| 5 | session_map + gpt_debate (resume, 잠금, 라운드) | 완료 — `core/session_map.py`, `tools/debate.py`. 동시성(같은 세션 직렬화·다른 세션 병렬) 테스트 포함 |
+| 6 | gpt_cross_check → gpt_review (--output-schema, 2차 검증) | 완료 — `tools/cross_check.py`, `tools/review.py`, `schemas/*.json` |
+| 7 | gpt_status / gpt_session | 완료 — `tools/manage.py` |
+| 8 | 실패 시나리오 테스트: 미로그인/미설치 · 한도 도달 문구 · 타임아웃 · 병렬 같은 세션 · 저장 중단 후 재읽기 검증 · config 손상/누락 | 완료 — `codex-bridge/tests/` 74건, 가짜 `codex` CLI + 실제 `mcp` SDK로 stdio까지 왕복 |
+
+Windows 고유 항목(코드 심 `codex.cmd` 경로, `taskkill /T`)은 코드에 분기까지 넣었지만 이 개발 환경이
+Linux라 실제 Windows 실행으로는 확인하지 못했다 — 사용자 PC(Windows)에서 1차 확인 시 함께 봐야 한다.
 
 ## 11. 확장 항목
 

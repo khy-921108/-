@@ -1,0 +1,29 @@
+{
+  "codex": {
+    "command": "codex",
+    "model": null,
+    "sandbox": "read-only",
+    "timeout_sec": 600,
+    "extra_args": ["--skip-git-repo-check"]
+  },
+  "limits": {
+    "max_input_chars": 200000,
+    "file_handoff_chars": 20000,
+    "max_debate_rounds": 5,
+    "allowed_roots": []
+  },
+  "session": {
+    "dir": "sessions",
+    "retention_days": 30,
+    "lock_timeout_sec": 10
+  },
+  "preflight": {
+    "cache_sec": 600
+  },
+  "logging": {
+    "dir": "logs",
+    "level": "INFO",
+    "log_bodies": false,
+    "slow_call_sec": 180
+  }
+}

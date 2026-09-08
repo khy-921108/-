@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "gpt_cross_check response",
+  "type": "object",
+  "required": ["verdict", "items", "missing_points"],
+  "properties": {
+    "verdict": { "type": "string", "enum": ["agree", "partial", "disagree"] },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["point", "status", "reason"],
+        "properties": {
+          "point": { "type": "string" },
+          "status": { "type": "string", "enum": ["agree", "disagree", "missing"] },
+          "reason": { "type": "string" },
+          "evidence": { "type": "string" }
+        }
+      }
+    },
+    "missing_points": { "type": "array", "items": { "type": "string" } }
+  }
+}
