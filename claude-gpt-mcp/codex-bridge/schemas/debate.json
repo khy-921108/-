@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "gpt_debate response",
+  "type": "object",
+  "required": ["rebuttal", "additions", "agreed", "open_issues"],
+  "properties": {
+    "rebuttal": { "type": "string" },
+    "additions": { "type": "string" },
+    "agreed": { "type": "array", "items": { "type": "string" } },
+    "open_issues": { "type": "array", "items": { "type": "string" } },
+    "conclusion": { "type": ["string", "null"] }
+  }
+}
