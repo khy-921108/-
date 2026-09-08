@@ -1,0 +1,4 @@
+sessions/
+logs/
+config.json
+__pycache__/
