@@ -1,4 +1,4 @@
-sessions/
-logs/
-config.json
+codex-bridge/sessions/
+codex-bridge/logs/
+codex-bridge/config.json
 __pycache__/
