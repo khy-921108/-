@@ -7,8 +7,15 @@
 
 export interface WpParticipant {
   name: string;
+  /** 불러온 사람은 빈 값. 전체 생년월일·번호를 draft에 저장하지 않는다. */
   birthDate: string;
   phone: string;
+  /** 불러온 사람의 서버 암호화 토큰(12시간). 있으면 서버에 이 값을 보낸다. */
+  ref?: string | null;
+  /** 같은 사람 판별값(직접 입력·불러오기 공통) */
+  personId?: string | null;
+  birthYear?: string | null;
+  phoneLast4?: string | null;
   // 표시용 스냅샷(검증 결과)
   companyName?: string | null;
   target?: string | null;       // 교육 대상 코드(TRUCK/WORKER/HEAVY 등) — 장비 대조용
@@ -75,6 +82,11 @@ export interface WpDraft {
   photos?: string[];
   /** 복사 재신청으로 만든 초안 — 제출 화면에서 "오늘 조건 확인" 필수 체크 요구 */
   copied?: boolean;
+}
+
+/** 서버로 보낼 참여자 값 — 불러온 사람은 ref 만 보낸다. */
+export function participantPayload(p: WpParticipant) {
+  return p.ref ? { ref: p.ref } : { name: p.name, birthDate: p.birthDate, phone: p.phone };
 }
 
 const KEY = 'wpDraft';

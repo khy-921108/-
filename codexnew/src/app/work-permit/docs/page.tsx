@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { readDraft, type WpParticipant } from '@/lib/work-permit-draft';
+import { participantPayload, readDraft, type WpParticipant } from '@/lib/work-permit-draft';
 import {
   PLEDGE_INTRO,
   PLEDGE_CLAUSES,
@@ -29,6 +29,13 @@ interface UndertakingStatus {
 
 const NATIONALITIES = ['한국', '中国', 'Việt Nam', '기타'];
 const BLOOD_TYPES = ['A형', 'B형', 'O형', 'AB형'];
+
+/** 서약 입력칸 초기값. 불러온 사람은 혈액형을 직접 고르게 비워 둔다. */
+const blankPledgeForm = (p?: WpParticipant) => ({
+  nationality: '한국',
+  bloodType: p?.ref ? '' : 'A형',
+  jobType: '',
+});
 
 export default function WorkPermitDocs() {
   const router = useRouter();
@@ -66,7 +73,7 @@ export default function WorkPermitDocs() {
         body: JSON.stringify({
           companyId: cid,
           workEnd: we,
-          participants: ps.map((p) => ({ name: p.name, birthDate: p.birthDate, phone: p.phone })),
+          participants: ps.map(participantPayload),
         }),
       });
       const json = await res.json();
@@ -82,10 +89,11 @@ export default function WorkPermitDocs() {
         const next = { ...prev };
         json.data.pledges.forEach((pl: PledgeStatus, i: number) => {
           if (pl.status !== 'VALID' && !next[i]) {
+            const blank = blankPledgeForm(ps[i]);
             next[i] = {
-              nationality: pl.saved?.nationality ?? '한국',
-              bloodType: pl.saved?.bloodType ?? 'A형',
-              jobType: pl.saved?.jobType ?? '',
+              nationality: pl.saved?.nationality ?? blank.nationality,
+              bloodType: pl.saved?.bloodType ?? blank.bloodType,
+              jobType: pl.saved?.jobType ?? blank.jobType,
             };
           }
         });
@@ -140,7 +148,7 @@ export default function WorkPermitDocs() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: p.name, birthDate: p.birthDate, phone: p.phone, companyId,
+          ...participantPayload(p), companyId,
           nationality: form.nationality, bloodType: form.bloodType, jobType: form.jobType.trim(),
           signature: pSig[i],
         }),
@@ -179,7 +187,7 @@ export default function WorkPermitDocs() {
           workArea: uArea.trim(),
           managerName: uManager.trim(),
           managerPhone: uPhone.trim(),
-          members: participants.map((p) => ({ name: p.name, birthDate: p.birthDate, phone: p.phone })),
+          members: participants.map(participantPayload),
         }),
       });
       const json = await res.json();
@@ -219,7 +227,7 @@ export default function WorkPermitDocs() {
             {participants.map((p, i) => {
               const pl = pledges[i];
               const valid = pl?.status === 'VALID';
-              const form = pForm[i] ?? { nationality: '한국', bloodType: 'A형', jobType: '' };
+              const form = pForm[i] ?? blankPledgeForm(p);
               return (
                 <div key={i} className="card space-y-2">
                   <div className="flex items-center justify-between">
@@ -249,6 +257,7 @@ export default function WorkPermitDocs() {
                           value={form.bloodType}
                           onChange={(e) => setPForm((f) => ({ ...f, [i]: { ...form, bloodType: e.target.value } }))}
                         >
+                          {p.ref && <option value="">선택</option>}
                           {BLOOD_TYPES.map((b) => <option key={b} value={b}>{b}</option>)}
                         </select>
                       </div>

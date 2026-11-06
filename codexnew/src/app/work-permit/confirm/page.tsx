@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { readDraft, clearDraft, type WpDraft } from '@/lib/work-permit-draft';
+import { participantPayload, readDraft, clearDraft, type WpDraft } from '@/lib/work-permit-draft';
 import { SUPPLEMENTAL_WORKS } from '@/lib/work-permit-constants';
 import SignaturePad from '@/components/SignaturePad';
 
@@ -57,9 +57,7 @@ export default function WorkPermitConfirm() {
             applicantBirthDate: draft.applicant!.birthDate,
           },
           supplemental: draft.supplemental ?? {},
-          participants: (draft.participants ?? []).map((p) => ({
-            name: p.name, birthDate: p.birthDate, phone: p.phone,
-          })),
+          participants: (draft.participants ?? []).map(participantPayload),
           // R-6 ③-3: 승인자/안전관리자/사진 미입력. 신청인 서명 + TBM 위험요인·안전대책만.
           approval: {},
           tbmDetail: draft.tbmDetail ?? {},

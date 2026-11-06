@@ -3,19 +3,25 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { normalizePhone } from '@/lib/equipment';
 import { sixMonthsLater } from '@/lib/safety-doc-status';
 import { isValidSignature } from '@/lib/upload-validate';
+import { resolvePersonInput } from '@/lib/person-ref';
 
 /**
  * POST /api/safety-pledges  (공개) — 개인 안전준수 서약(#8) 발급
- * req: { name, birthDate, phone, companyId, nationality, bloodType, jobType }
+ * req: { name, birthDate, phone (또는 ref), companyId, nationality, bloodType, jobType }
  * - 6개월 유효(issued + 6개월). 서명은 현장(앱 미입력).
  * - 발급 시 company_name 스냅샷.
  */
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const name = (typeof body.name === 'string' ? body.name : '').trim();
-    const birthDate = (typeof body.birthDate === 'string' ? body.birthDate : '').trim();
-    const phone = (typeof body.phone === 'string' ? body.phone : '').replace(/[^0-9]/g, '');
+    const resolved = resolvePersonInput(body);
+    if (!resolved.ok) {
+      return NextResponse.json(
+        { success: false, code: resolved.code, message: resolved.message },
+        { status: 400 }
+      );
+    }
+    const { name, birthDate, phone } = resolved.person;
     const companyId =
       typeof body.companyId === 'string' && body.companyId.trim() ? body.companyId.trim() : null;
     const nationality = (typeof body.nationality === 'string' ? body.nationality : '').trim() || null;

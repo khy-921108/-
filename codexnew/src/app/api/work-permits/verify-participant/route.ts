@@ -2,13 +2,14 @@ import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { evaluateParticipant } from '@/lib/participant-eligibility';
 import { maskPhone } from '@/lib/format';
+import { personIdOf, resolvePersonInput } from '@/lib/person-ref';
 
 /**
  * POST /api/work-permits/verify-participant  (공개) — 1명씩 본인확인
- * req: { name, birthDate, phone, workEnd }  (작업 종료일시 — 작업일 기준 판정)
+ * req: { name, birthDate, phone, workEnd } 또는 { ref, workEnd }  (작업 종료일시 — 작업일 기준 판정)
  * res: { success, data:{ status:'VALID'|'EXPIRED'|'NONE', name, companyName, targetLabel,
  *                        vehicleNumber?, spec?, equipmentType?, completedAt, expiresAt,
- *                        marginDays, phoneMasked } }
+ *                        marginDays, phoneMasked, personId } }
  *
  * - VALID: expires_at >= workEnd (작업일까지 유효)
  * - EXPIRED: 작업일에 만료 → 추가불가
@@ -18,9 +19,14 @@ import { maskPhone } from '@/lib/format';
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const name = (typeof body.name === 'string' ? body.name : '').trim();
-    const birthDate = (typeof body.birthDate === 'string' ? body.birthDate : '').trim();
-    const phone = typeof body.phone === 'string' ? body.phone : '';
+    const resolved = resolvePersonInput(body);
+    if (!resolved.ok) {
+      return NextResponse.json(
+        { success: false, code: resolved.code, message: resolved.message },
+        { status: 400 }
+      );
+    }
+    const { name, birthDate, phone } = resolved.person;
     const workEnd = typeof body.workEnd === 'string' ? body.workEnd : '';
 
     if (!name || !birthDate || !phone) {
@@ -55,6 +61,7 @@ export async function POST(req: Request) {
         expiresAt: result.expiresAt,
         marginDays: result.marginDays,
         phoneMasked: maskPhone(phone),
+        personId: personIdOf({ name, birthDate, phone }),
       },
     });
   } catch (e) {

@@ -6,6 +6,7 @@ import { SUPPLEMENTAL_KEYS } from '@/lib/work-permit-constants';
 import { evaluateRequiredDocs } from '@/lib/safety-doc-status';
 import { sendSms } from '@/lib/sms';
 import { isValidSignature, isValidPhoto, MAX_PHOTO_BYTES, dataUrlBytes } from '@/lib/upload-validate';
+import { personKey, resolvePersonInputs } from '@/lib/person-ref';
 
 export const runtime = 'nodejs';
 
@@ -16,6 +17,7 @@ export const runtime = 'nodejs';
  * - 신청번호 RPC 원자 발급 + UNIQUE 백스톱 + 충돌 ≤3회 재시도.
  * - work_permits + participants 스냅샷(이름·업체명·차량·유효기간) INSERT.
  * - 안전조치 16항목은 수집하지 않음(현장 빈칸).
+ * - 참여자는 {name,birthDate,phone} 또는 {ref}. 풀어낸 뒤 같은 사람이 있으면 거부.
  */
 export async function POST(req: Request) {
   try {
@@ -100,6 +102,28 @@ export async function POST(req: Request) {
       );
     }
 
+    // 참여자 입력 정리 — 불러온 사람(ref)과 직접 입력을 같은 형태로 맞춘다.
+    const resolvedPeople = resolvePersonInputs(participantsIn);
+    if (!resolvedPeople.ok) {
+      return NextResponse.json(
+        { success: false, code: resolvedPeople.code, message: resolvedPeople.message },
+        { status: 400 }
+      );
+    }
+    const people = resolvedPeople.persons;
+    const seenPeople = new Set<string>();
+    for (const p of people) {
+      if (!p.name || !p.birthDate || !p.phone) continue; // 아래 재검증에서 INVALID_INPUT 처리
+      const k = personKey(p);
+      if (seenPeople.has(k)) {
+        return NextResponse.json(
+          { success: false, code: 'DUPLICATE_PARTICIPANT', message: `같은 참여자가 두 번 들어 있습니다: ${p.name}. 참여자 단계에서 한 명을 빼 주세요.` },
+          { status: 400 }
+        );
+      }
+      seenPeople.add(k);
+    }
+
     const supabase = createServiceClient();
 
     // ---- 2. 업체 확인(스냅샷용 이름) ----
@@ -131,10 +155,7 @@ export async function POST(req: Request) {
     // ---- 3. 참여자 서버 재검증 (작업종료일 기준) ----
     const evaluated = [];
     const invalid: { name: string; status: string }[] = [];
-    for (const p of participantsIn) {
-      const name = (p?.name ?? '').trim();
-      const birthDate = (p?.birthDate ?? '').trim();
-      const phone = (p?.phone ?? '').replace(/[^0-9]/g, '');
+    for (const { name, birthDate, phone } of people) {
       if (!name || !birthDate || !phone) {
         invalid.push({ name: name || '(이름없음)', status: 'INVALID_INPUT' });
         continue;
@@ -196,11 +217,7 @@ export async function POST(req: Request) {
 
     // ---- 3.5 필수서류(1C-2) 서버 재검증 (작업종료일 기준) ----
     //  각 참여자 유효 개인서약 + 업체 유효 이행각서(모든 참여자 커버). 클라 'docs 완료' 불신.
-    const docPersons = participantsIn.map((p: any) => ({
-      name: (p?.name ?? '').trim(),
-      birthDate: (p?.birthDate ?? '').trim(),
-      phone: (p?.phone ?? '').toString(),
-    }));
+    const docPersons = people;
     let docs;
     try {
       docs = await evaluateRequiredDocs(supabase, { companyId, participants: docPersons, workEnd });

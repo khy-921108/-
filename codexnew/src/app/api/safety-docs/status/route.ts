@@ -2,12 +2,15 @@ import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { evaluateRequiredDocs, type DocPerson } from '@/lib/safety-doc-status';
 import { maskPhone } from '@/lib/format';
+import { resolvePersonInputs } from '@/lib/person-ref';
 
 /**
  * POST /api/safety-docs/status  (공개) — 필수문서 유효성 확인
  * (참여자 목록 전달 필요 → GET 대신 POST. 요청받은 참여자·업체 범위만 반환)
- * req: { companyId, workEnd, participants:[{name,birthDate,phone}] }
+ * req: { companyId, workEnd, participants:[{name,birthDate,phone} 또는 {ref}] }
  * res: { success, data:{ pledges:[{name, status, expiresAt, saved}], undertaking:{...}, allValid } }
+ * - pledges 순서는 입력 순서 그대로(화면이 순서로 대조).
+ * - ref 로 온 사람은 서약 상태와 상관없이 saved 를 비운다. 신청인이 그 사람의 국적·혈액형·직종을 보면 안 된다.
  * - 다른 업체/전체 문서/전체 명단 노출 금지. 이행각서 members 연락처는 마스킹.
  */
 export async function POST(req: Request) {
@@ -31,11 +34,14 @@ export async function POST(req: Request) {
       );
     }
 
-    const participants: DocPerson[] = participantsIn.map((p) => ({
-      name: (p?.name ?? '').trim(),
-      birthDate: (p?.birthDate ?? '').trim(),
-      phone: (p?.phone ?? '').toString(),
-    }));
+    const resolved = resolvePersonInputs(participantsIn);
+    if (!resolved.ok) {
+      return NextResponse.json(
+        { success: false, code: resolved.code, message: resolved.message },
+        { status: 400 }
+      );
+    }
+    const participants: DocPerson[] = resolved.persons;
 
     const supabase = createServiceClient();
     const result = await evaluateRequiredDocs(supabase, { companyId, participants, workEnd });
@@ -45,11 +51,12 @@ export async function POST(req: Request) {
       success: true,
       data: {
         allValid: result.allValid,
-        pledges: result.pledges.map((pl) => ({
+        pledges: result.pledges.map((pl, i) => ({
           name: pl.name,
           status: pl.status,
           expiresAt: pl.expiresAt,
-          saved: pl.saved, // 국적·혈액형·직종(재사용 프리필용) — PII 아님
+          // 국적·혈액형·직종(직접 입력한 사람의 재사용 프리필용)
+          saved: resolved.fromRef[i] ? null : pl.saved,
         })),
         undertaking: {
           status: result.undertaking.status,

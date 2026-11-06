@@ -2,10 +2,11 @@ import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { normalizePhone } from '@/lib/equipment';
 import { sixMonthsLater } from '@/lib/safety-doc-status';
+import { resolvePersonInputs } from '@/lib/person-ref';
 
 /**
  * POST /api/company-undertakings  (공개) — 업체 안전작업 이행각서(#9) 발급/재발급
- * req: { companyId, workArea?, managerName, managerPhone, members:[{name,birthDate,phone}] }
+ * req: { companyId, workArea?, managerName, managerPhone, members:[{name,birthDate,phone} 또는 {ref}] }
  * - 6개월 블랭킷. 새 행 INSERT(최신이 유효본). 대표/현장소장 인은 현장(앱 미입력).
  * - members = 기존 최신 각서 명단 ∪ 이번 요청 명단(중복 제거). company_members 전체 덤프 안 함.
  */
@@ -28,6 +29,14 @@ export async function POST(req: Request) {
     if (!managerName) {
       return NextResponse.json(
         { success: false, code: 'INVALID_INPUT', message: '관리감독자명을 입력해 주세요.' },
+        { status: 400 }
+      );
+    }
+
+    const resolved = resolvePersonInputs(membersIn);
+    if (!resolved.ok) {
+      return NextResponse.json(
+        { success: false, code: resolved.code, message: resolved.message },
         { status: 400 }
       );
     }
@@ -57,7 +66,7 @@ export async function POST(req: Request) {
       `${m.name}||${m.birthDate ?? ''}||${normalizePhone(m.phone) ?? ''}`;
 
     const merged = new Map<string, { name: string; birthDate: string | null; phone: string | null }>();
-    for (const m of [...prevMembers, ...membersIn]) {
+    for (const m of [...prevMembers, ...resolved.persons]) {
       const nm = norm(m);
       if (!nm.name) continue;
       merged.set(key(nm), nm);
