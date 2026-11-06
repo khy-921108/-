@@ -1,0 +1,6 @@
+codex-bridge/sessions/
+codex-bridge/logs/
+codex-bridge/config.json
+__pycache__/
+*.pyc
+.pytest_cache/

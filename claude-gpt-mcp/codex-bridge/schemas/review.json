@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "gpt_review response",
+  "type": "object",
+  "required": ["summary", "findings"],
+  "properties": {
+    "summary": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["severity", "location", "issue", "fix"],
+        "properties": {
+          "severity": { "type": "string", "enum": ["high", "mid", "low"] },
+          "location": { "type": "string" },
+          "issue": { "type": "string" },
+          "fix": { "type": "string" }
+        }
+      }
+    }
+  }
+}
