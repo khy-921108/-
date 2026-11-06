@@ -57,6 +57,11 @@ export async function GET(req: Request) {
       if (sessIds.length) completions = await fetchFiltered(supabase, 'completions', '*', (q) => q.in('session_id', sessIds));
     }
 
+    // 수정·삭제 로그(기록 시각 기준으로 해당 기간)
+    const inPeriod = (q: any) => q.gte('created_at', startIso).lte('created_at', endIso).order('created_at', { ascending: true });
+    const trainingLogs = await fetchFiltered(supabase, 'training_record_logs', '*', inPeriod);
+    const permitDeleteLogs = await fetchFiltered(supabase, 'work_permit_delete_logs', '*', inPeriod);
+
     const tooMany = !half && permits.length > 150;
 
     const zip = new JSZip();
@@ -67,6 +72,8 @@ export async function GET(req: Request) {
     zip.file('json/company_undertakings.json', JSON.stringify(undertakings, null, 2));
     zip.file('json/completions.json', JSON.stringify(completions, null, 2));
     zip.file('json/training_sessions.json', JSON.stringify(sessions, null, 2));
+    zip.file('json/training_record_logs.json', JSON.stringify(trainingLogs, null, 2));
+    zip.file('json/work_permit_delete_logs.json', JSON.stringify(permitDeleteLogs, null, 2));
 
     // 엑셀 요약
     const wb = new ExcelJS.Workbook();
@@ -98,6 +105,7 @@ export async function GET(req: Request) {
       `----------------------------------------\n` +
       `작업허가서: ${permits.length}건 (회사양식 xlsx 생성 ${formOk} · 실패 ${formFail})\n` +
       `참여자: ${participants.length} · 업체: ${companies.length} · 수료: ${completions.length} · 서약: ${pledges.length} · 각서: ${undertakings.length}\n` +
+      `수료기록 수정·삭제 로그: ${trainingLogs.length} · 허가서 삭제 로그: ${permitDeleteLogs.length}\n` +
       `----------------------------------------\n` +
       (tooMany ? '⚠ 대상이 150건을 넘습니다. 시간이 오래 걸리면 [전반기/후반기 분할 다운로드]를 이용하세요.\n' : '') +
       `※ TBM 현장 사진은 [이 달 사진 백업]으로 별도. 매월 그 달치를 받아 회사 NAS(안전환경부서자료)에 보관하세요.\n`

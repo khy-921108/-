@@ -20,6 +20,9 @@ export const runtime = 'nodejs';
  * 매칭 키:
  *   companies: name (대소문자 무시) → 없으면 신규 생성 (status=REVIEW, created_by=ADMIN, warning 으로 표시)
  *   company_members: (company_id, name, birth_date, normalized_phone) UNIQUE NULLS NOT DISTINCT
+ *
+ * 업체명이 숨김 업체(archived_at)와 같으면 그 업체 행과 소속 인원 행은 반영하지 않고
+ * warnings 와 skippedHidden 으로 건너뜀을 표시한다(숨김 업체 수정·인원 추가 금지).
  */
 export async function POST(req: Request) {
   const auth = await requirePermission('EXCEL_IMPORT');
@@ -77,15 +80,52 @@ export async function POST(req: Request) {
     }, { status: 400 });
   }
 
+  const supabase = createServiceClient();
+
+  // 숨김 업체명 — 미리보기·실제 반영 모두 같은 기준으로 건너뛴다.
+  const { data: hiddenRows, error: hiddenErr } = await supabase
+    .from('companies')
+    .select('name')
+    .not('archived_at', 'is', null);
+  if (hiddenErr) {
+    console.error('[admin/companies/import] hidden companies err:', hiddenErr);
+    return NextResponse.json(
+      { success: false, code: 'QUERY_FAILED', message: hiddenErr.message },
+      { status: 500 }
+    );
+  }
+  const hiddenNames = new Set((hiddenRows ?? []).map((r: { name: string }) => r.name.trim().toLowerCase()));
+  const isHidden = (name: string) => hiddenNames.has(name.trim().toLowerCase());
+
+  const skippedHidden = { companies: 0, members: 0 };
+  const importCompanies: CompanyRowInput[] = [];
+  for (const c of parsed.companies) {
+    if (isHidden(c.name)) {
+      skippedHidden.companies += 1;
+      warnings.push({ sheet: '업체', rowIndex: c.rowIndex, message: `숨김 처리된 업체 "${c.name}" → 건너뜀(반영 안 함)` });
+    } else {
+      importCompanies.push(c);
+    }
+  }
+  const importMembers: MemberRowInput[] = [];
+  for (const m of parsed.members) {
+    if (isHidden(m.companyName)) {
+      skippedHidden.members += 1;
+      warnings.push({ sheet: '인원', rowIndex: m.rowIndex, message: `숨김 처리된 업체 "${m.companyName}" 소속 → 건너뜀(반영 안 함)` });
+    } else {
+      importMembers.push(m);
+    }
+  }
+
   // 같은 업체명이 엑셀 내에서 여러 번 등장하는 경우 → 마지막 행 우선 (upsert)
   const companyByName = new Map<string, CompanyRowInput>();
-  for (const c of parsed.companies) {
+  for (const c of importCompanies) {
     companyByName.set(c.name.toLowerCase(), c);
   }
 
   // 회원: 업체명 → 행 그룹화 (실제 upsert 시 company_id 매핑 후 처리)
   const memberRowsByCompanyName = new Map<string, MemberRowInput[]>();
-  for (const m of parsed.members) {
+  for (const m of importMembers) {
     const key = m.companyName.toLowerCase();
     const arr = memberRowsByCompanyName.get(key) ?? [];
     arr.push(m);
@@ -111,7 +151,7 @@ export async function POST(req: Request) {
     status: c.status,
     note: c.note,
   }));
-  const previewMembers = parsed.members.map((m) => ({
+  const previewMembers = importMembers.map((m) => ({
     rowIndex: m.rowIndex,
     member_type: m.memberType,
     company_name: m.companyName,
@@ -144,6 +184,7 @@ export async function POST(req: Request) {
         dryRun: true,
         companies: { count: previewCompanies.length, rows: previewCompanies },
         members: { count: previewMembers.length, rows: previewMembers },
+        skippedHidden,
         errors,
         warnings,
       },
@@ -154,8 +195,6 @@ export async function POST(req: Request) {
   }
 
   // ===== 실제 반영 =====
-  const supabase = createServiceClient();
-
   // 1. 기존 업체 조회 (참조된 모든 업체명)
   const referencedAll = new Set<string>([
     ...Array.from(companyByName.keys()),
@@ -267,9 +306,9 @@ export async function POST(req: Request) {
   }
 
   // 4. 회원 upsert
-  const memberResults = { inserted: 0, updated: 0, skipped: 0 };
+  const memberResults = { inserted: 0, updated: 0, skipped: skippedHidden.members };
 
-  for (const m of parsed.members) {
+  for (const m of importMembers) {
     const company = existingByLowerName.get(m.companyName.toLowerCase());
     if (!company) {
       memberResults.skipped += 1;
@@ -347,6 +386,7 @@ export async function POST(req: Request) {
       dryRun: false,
       companies: companyResults,
       members: memberResults,
+      skippedHidden,
       // 실패(검증 불통과) 행은 반영 안 됨 — "몇 행: 사유" 목록으로 보고
       errors,
       warnings,

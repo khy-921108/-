@@ -513,7 +513,7 @@ export default function RegisterPage() {
         <div>
           <label className="label">생년월일</label>
           <input
-            type="date"
+            type="date" max="9999-12-31"
             className="input-base"
             value={birthDate}
             onChange={(e) => setBirthDate(e.target.value)}

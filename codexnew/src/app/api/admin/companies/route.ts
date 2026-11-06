@@ -29,6 +29,7 @@ export async function GET(req: Request) {
     .select(
       'id, name, biz_no, company_type, manager_name, phone, address, tel, biz_status, biz_checked_at, status, created_by, note, created_at, updated_at'
     )
+    .is('archived_at', null) // 숨김 업체 제외
     .order('created_at', { ascending: false })
     .limit(500);
 
@@ -51,7 +52,7 @@ export async function GET(req: Request) {
   }
 
   // 상태별 통계 (필터와 무관한 전체 통계)
-  const { data: statusRows } = await supabase.from('companies').select('status');
+  const { data: statusRows } = await supabase.from('companies').select('status').is('archived_at', null);
   const stats = { total: 0, review: 0, active: 0, disabled: 0 };
   (statusRows ?? []).forEach((r: { status: string }) => {
     stats.total += 1;

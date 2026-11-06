@@ -49,7 +49,7 @@ export async function GET(req: Request) {
     let sq = supabase
       .from('training_sessions')
       .select(`
-        id, name, affiliation, phone, birth_date, vehicle_number, status, created_at,
+        id, name, affiliation, company_id, phone, birth_date, vehicle_number, status, created_at,
         target_types(code, label)
       `)
       .order('created_at', { ascending: false });
@@ -109,6 +109,7 @@ export async function GET(req: Request) {
       sessionId: s.id,
       name: s.name,
       affiliation: s.affiliation,
+      companyId: s.company_id ?? null,
       phone: s.phone,
       birthDate: s.birth_date,
       vehicleNumber: s.vehicle_number ?? null,

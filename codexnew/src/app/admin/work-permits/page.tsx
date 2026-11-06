@@ -63,6 +63,7 @@ export default function AdminWorkPermitsPage() {
   const maxMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + 1); return ymOf(d); })(); // 다음 달까지
   const shiftMonth = (ym: string, delta: number) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + delta, 1); return ymOf(d); };
   const PAGE_SIZE = 10;
+  const MAX_DELETE = 50;
 
   const thisYear = String(new Date().getFullYear());
   const [items, setItems] = useState<Item[]>([]);
@@ -73,6 +74,15 @@ export default function AdminWorkPermitsPage() {
   const [yearSel, setYearSel] = useState(thisYear);
   const [tab, setTab] = useState<'all' | 'todo' | 'active' | 'done'>('all');
   const [page, setPage] = useState(1);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [delOpen, setDelOpen] = useState(false);
+  const [delReason, setDelReason] = useState('');
+  const [delSaving, setDelSaving] = useState(false);
+  const [delErr, setDelErr] = useState('');
+  const [delResult, setDelResult] = useState<null | {
+    deleted: { id: string; permitNumber: string }[];
+    refused: { id: string; permitNumber: string | null; reasons: string[] }[];
+  }>(null);
 
   const load = async (kw = keyword, mode = periodMode, m = month, y = yearSel) => {
     setLoading(true);
@@ -93,6 +103,7 @@ export default function AdminWorkPermitsPage() {
   // 진입/기간 변경 시 자동 조회 (조회 버튼 없이)
   useEffect(() => {
     setPage(1);
+    setChecked(new Set());
     load(keyword, periodMode, month, yearSel);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month, yearSel, periodMode]);
@@ -102,6 +113,40 @@ export default function AdminWorkPermitsPage() {
 
   const openDetail = (permitId: string) => {
     router.push(`/admin/work-permits/${permitId}`);
+  };
+
+  const toggleChecked = (permitId: string) => {
+    setChecked((s) => {
+      const n = new Set(s);
+      if (n.has(permitId)) n.delete(permitId); else n.add(permitId);
+      return n;
+    });
+  };
+
+  // 선택 삭제 — 문자 없음. 조건에 안 맞는 건은 서버가 건별 사유와 함께 돌려준다.
+  const submitDelete = async () => {
+    if (!delReason.trim()) { setDelErr('삭제 사유를 입력해 주세요.'); return; }
+    if (checked.size > MAX_DELETE) { setDelErr(`한 번에 최대 ${MAX_DELETE}건까지 삭제할 수 있습니다.`); return; }
+    setDelSaving(true);
+    setDelErr('');
+    try {
+      const res = await fetch('/api/admin/work-permits', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(checked), reason: delReason.trim() }),
+      });
+      const json = await res.json();
+      if (!json.success) { setDelErr(json.message || '삭제 실패'); setDelSaving(false); return; }
+      setDelResult(json.data);
+      setDelOpen(false);
+      setDelReason('');
+      setChecked(new Set());
+      setDelSaving(false);
+      await load();
+    } catch {
+      setDelErr('네트워크 오류입니다. 잠시 후 다시 시도해 주세요.');
+      setDelSaving(false);
+    }
   };
 
   // 3분류 탭: 처리 필요(todo) / 작업 중(active) / 끝난 것(done). stage 공용 버킷 사용.
@@ -194,10 +239,34 @@ export default function AdminWorkPermitsPage() {
         </div>
       </div>
 
+      {delResult && (
+        <div className="card text-sm space-y-1 bg-slate-50 border border-slate-200">
+          <div className="flex items-start justify-between gap-3">
+            <p className="font-bold text-slate-800">삭제 {delResult.deleted.length}건 · 삭제 안 됨 {delResult.refused.length}건</p>
+            <button onClick={() => setDelResult(null)} className="shrink-0 text-slate-500 text-lg leading-none" aria-label="결과 닫기">×</button>
+          </div>
+          {delResult.deleted.length > 0 && (
+            <p className="text-xs text-slate-600">삭제: {delResult.deleted.map((d) => d.permitNumber).join(', ')}</p>
+          )}
+          {delResult.refused.map((r) => (
+            <p key={r.id} className="text-xs text-red-700">
+              {r.permitNumber ?? r.id}: {r.reasons.join(', ')}
+            </p>
+          ))}
+        </div>
+      )}
+
       <div className="space-y-2">
-        <p className="text-sm font-semibold text-slate-700">
-          {periodMode === 'month' ? `${my}년 ${Number(mm)}월` : `${yearSel}년`} · {tab === 'all' ? '전체' : tab === 'todo' ? '처리 필요' : tab === 'active' ? '작업 중' : '끝난 것'} {filtered.length}건
-        </p>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold text-slate-700">
+            {periodMode === 'month' ? `${my}년 ${Number(mm)}월` : `${yearSel}년`} · {tab === 'all' ? '전체' : tab === 'todo' ? '처리 필요' : tab === 'active' ? '작업 중' : '끝난 것'} {filtered.length}건
+          </p>
+          <button
+            onClick={() => { setDelErr(''); setDelOpen(true); }}
+            disabled={checked.size === 0}
+            className="shrink-0 whitespace-nowrap text-xs px-3 py-1.5 rounded-lg font-bold border border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-40"
+          >🗑 선택 삭제{checked.size > 0 ? ` (${checked.size})` : ''}</button>
+        </div>
         {visibleItems.map((it) => {
           const supp = suppLabels(it.supplemental);
           const sig = it.signature;
@@ -264,6 +333,18 @@ export default function AdminWorkPermitsPage() {
                 </div>
               )}
               <div className="flex gap-3 pt-2 border-t border-slate-100">
+                <label
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  className="flex items-center gap-1 text-xs font-bold text-slate-600 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked.has(it.permitId)}
+                    onChange={() => toggleChecked(it.permitId)}
+                  />
+                  선택
+                </label>
                 <a
                   href={`/work-permit/print/${it.permitId}`}
                   target="_blank"
@@ -304,6 +385,31 @@ export default function AdminWorkPermitsPage() {
           </div>
         )}
       </div>
+
+      {delOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !delSaving && setDelOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-bold text-red-700">작업허가 선택 삭제</h3>
+            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-slate-700 space-y-1">
+              <p>선택한 <span className="font-bold text-red-700">{checked.size}건</span>을 삭제합니다. 문자는 가지 않습니다.</p>
+              <p className="text-xs text-slate-600">1차 승인 전이고 TBM 기록이 없는 건만 삭제되며, 나머지는 사유와 함께 표시됩니다. 지운 내용은 로그에 남습니다.</p>
+            </div>
+            <div>
+              <label className="label">삭제 사유 <span className="text-red-500">*</span></label>
+              <textarea className="input-base min-h-[72px]" placeholder="예: 업체 요청으로 신청 취소" value={delReason} onChange={(e) => setDelReason(e.target.value)} />
+            </div>
+            {delErr && <p className="text-sm text-red-600">{delErr}</p>}
+            <div className="flex gap-2 justify-end pt-1">
+              <button className="btn-secondary" onClick={() => setDelOpen(false)} disabled={delSaving}>취소</button>
+              <button
+                className="whitespace-nowrap text-sm px-5 py-2 rounded-lg font-bold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                onClick={submitDelete}
+                disabled={delSaving}
+              >{delSaving ? '처리 중…' : '삭제'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

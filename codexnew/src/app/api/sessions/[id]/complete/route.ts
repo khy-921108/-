@@ -87,46 +87,53 @@ export async function POST(_req: Request, ctx: { params: { id: string } }) {
     const expiresAt = new Date(completedAt);
     expiresAt.setMonth(expiresAt.getMonth() + validMonths);
 
-    const completionNumber = await generateCompletionNumber(prefix);
+    // 5. INSERT — UNIQUE 충돌(23505) 시 이 세션의 수료가 있으면 그것을 반환,
+    //    없으면 수료번호가 겹친 것이므로 번호를 다시 받아 최대 3회 재시도.
+    const MAX_RETRY = 3;
+    let completion: any = null;
+    let error: any = null;
+    for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
+      const completionNumber = await generateCompletionNumber(prefix);
+      const inserted = await supabase
+        .from('completions')
+        .insert({
+          session_id: sessionId,
+          target_type_id: session.target_type_id,
+          course_id: session.course_id,
+          course_version: course?.version ?? 1,
+          exam_result_id: latestExam.id,
+          completion_number: completionNumber,
+          completed_at: completedAt.toISOString(),
+          expires_at: expiresAt.toISOString(),
+          score: latestExam.score,
+        })
+        .select()
+        .single();
 
-    // 5. INSERT (UNIQUE 충돌 시 기존 반환)
-    const { data: completion, error } = await supabase
-      .from('completions')
-      .insert({
-        session_id: sessionId,
-        target_type_id: session.target_type_id,
-        course_id: session.course_id,
-        course_version: course?.version ?? 1,
-        exam_result_id: latestExam.id,
-        completion_number: completionNumber,
-        completed_at: completedAt.toISOString(),
-        expires_at: expiresAt.toISOString(),
-        score: latestExam.score,
-      })
-      .select()
-      .single();
+      completion = inserted.data;
+      error = inserted.error;
+      if (!error || error.code !== '23505') break;
 
-    if (error) {
-      // UNIQUE violation → 재조회
-      if (error.code === '23505') {
-        const { data: existingAfter } = await supabase
-          .from('completions')
-          .select('*')
-          .eq('session_id', sessionId)
-          .single();
-        if (existingAfter) {
-          return NextResponse.json({
-            success: true,
-            data: {
-              completionId: existingAfter.id,
-              completionNumber: existingAfter.completion_number,
-              completedAt: existingAfter.completed_at,
-              validUntil: existingAfter.expires_at,
-              alreadyCompleted: true,
-            },
-          });
-        }
+      const { data: existingAfter } = await supabase
+        .from('completions')
+        .select('*')
+        .eq('session_id', sessionId)
+        .maybeSingle();
+      if (existingAfter) {
+        return NextResponse.json({
+          success: true,
+          data: {
+            completionId: existingAfter.id,
+            completionNumber: existingAfter.completion_number,
+            completedAt: existingAfter.completed_at,
+            validUntil: existingAfter.expires_at,
+            alreadyCompleted: true,
+          },
+        });
       }
+    }
+
+    if (error || !completion) {
       console.error(error);
       return NextResponse.json(
         { success: false, code: 'SAVE_FAILED', message: '수료 저장 실패' },

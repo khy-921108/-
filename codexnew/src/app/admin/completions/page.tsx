@@ -8,6 +8,7 @@ interface Item {
   sessionId: string;
   name: string;
   affiliation: string;
+  companyId: string | null;
   phone: string;
   birthDate: string;
   vehicleNumber: string | null;
@@ -99,6 +100,9 @@ export default function AdminCompletionsPage() {
   const [page, setPage] = useState(1);
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Item | null>(null);
+  const [editing, setEditing] = useState<Item | null>(null);
+  const [deleting, setDeleting] = useState<Item | null>(null);
+  const [notice, setNotice] = useState('');
 
   const load = async (kw = keyword, y = yearSel, tt = targetType) => {
     setLoading(true);
@@ -143,42 +147,38 @@ export default function AdminCompletionsPage() {
   // ESC 키로 모달 닫기
   useEffect(() => {
     const onEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSelected(null);
+      if (e.key !== 'Escape') return;
+      // 수정·삭제 창이 열려 있으면 그것만 닫는다
+      if (editing || deleting) { setEditing(null); setDeleting(null); }
+      else setSelected(null);
     };
     window.addEventListener('keydown', onEsc);
     return () => window.removeEventListener('keydown', onEsc);
-  }, []);
+  }, [editing, deleting]);
 
   const handlePrint = () => {
     window.print();
   };
 
-  const handleDelete = async (item: Item) => {
-    const isProtected = item.status === 'VALID' || item.status === 'EXPIRED';
-    if (isProtected) {
-      alert('수료 이력이 있는 세션은 삭제할 수 없습니다.\n법적 이행 기록은 보존됩니다.');
-      return;
-    }
-    const ok = confirm(
-      `[${item.name}] 세션을 삭제하시겠습니까?\n시청 기록/시험 이력도 함께 삭제됩니다.\n이 작업은 되돌릴 수 없습니다.`
-    );
-    if (!ok) return;
-
-    const res = await fetch(`/api/admin/sessions/${item.sessionId}`, {
-      method: 'DELETE',
-    });
-    const json = await res.json();
-    if (!json.success) {
-      alert(json.message || '삭제 실패');
-      return;
-    }
+  // 수정·삭제 완료 → 창을 닫고 안내를 위에 남긴 뒤 목록 갱신
+  const afterChange = async (message: string) => {
+    setEditing(null);
+    setDeleting(null);
     setSelected(null);
+    setNotice(message);
     await load();
   };
 
   return (
     <main className="space-y-4">
       <h1 className="text-xl font-bold text-slate-800 no-print">수료 현황</h1>
+
+      {notice && (
+        <div className="card bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm flex items-start justify-between gap-3 no-print">
+          <p className="whitespace-pre-line">{notice}</p>
+          <button onClick={() => setNotice('')} className="shrink-0 text-emerald-700 text-lg leading-none" aria-label="안내 닫기">×</button>
+        </div>
+      )}
 
       {/* ① 숫자 카드 (클릭 = 필터 + 검색어·대상 초기화 — 카드 숫자와 목록 일치) */}
       <div className="grid grid-cols-4 gap-2 no-print">
@@ -336,8 +336,15 @@ export default function AdminCompletionsPage() {
           item={selected}
           onClose={() => setSelected(null)}
           onPrint={handlePrint}
-          onDelete={() => handleDelete(selected)}
+          onEdit={() => setEditing(selected)}
+          onDelete={() => setDeleting(selected)}
         />
+      )}
+      {editing && (
+        <EditRecordModal item={editing} onClose={() => setEditing(null)} onDone={afterChange} />
+      )}
+      {deleting && (
+        <DeleteRecordModal item={deleting} onClose={() => setDeleting(null)} onDone={afterChange} />
       )}
     </main>
   );
@@ -347,14 +354,15 @@ function DetailModal({
   item,
   onClose,
   onPrint,
+  onEdit,
   onDelete,
 }: {
   item: Item;
   onClose: () => void;
   onPrint: () => void;
+  onEdit: () => void;
   onDelete: () => void;
 }) {
-  const isProtected = item.status === 'VALID' || item.status === 'EXPIRED';
   const printDate = formatDate(new Date().toISOString());
 
   return (
@@ -444,19 +452,224 @@ function DetailModal({
               🖨️ 인쇄 / PDF 저장
             </button>
           </div>
-          {!isProtected && (
+          <div className="flex gap-2">
+            <button
+              onClick={onEdit}
+              className="flex-1 rounded-xl border-2 border-brand bg-white px-5 py-3 text-sm font-bold text-brand transition active:scale-95 hover:bg-brand/5"
+            >
+              ✏️ 수정
+            </button>
             <button
               onClick={onDelete}
-              className="w-full rounded-xl border-2 border-red-500 bg-white px-5 py-3 text-sm font-bold text-red-600 transition active:scale-95 hover:bg-red-50"
+              className="flex-1 rounded-xl border-2 border-red-500 bg-white px-5 py-3 text-sm font-bold text-red-600 transition active:scale-95 hover:bg-red-50"
             >
-              🗑️ 세션 삭제 (시청·시험 이력 함께 삭제)
+              🗑️ 삭제
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 수료 기록 수정 — 교육 대상은 수정 불가. 저장 시 서버가 권한·업체 상태를 다시 확인한다. */
+function EditRecordModal({
+  item,
+  onClose,
+  onDone,
+}: {
+  item: Item;
+  onClose: () => void;
+  onDone: (message: string) => void;
+}) {
+  const [name, setName] = useState(item.name);
+  const [birthDate, setBirthDate] = useState((item.birthDate ?? '').substring(0, 10));
+  const [phone, setPhone] = useState(item.phone ?? '');
+  const [vehicleNumber, setVehicleNumber] = useState(item.vehicleNumber ?? '');
+  const [newCompany, setNewCompany] = useState<{ id: string; name: string } | null>(null);
+  const [companyKeyword, setCompanyKeyword] = useState('');
+  const [companyResults, setCompanyResults] = useState<{ id: string; name: string }[] | null>(null);
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const searchCompany = async () => {
+    const kw = companyKeyword.trim();
+    if (!kw) return;
+    setErr('');
+    try {
+      // 공개 검색 API는 사용중지 업체를 빼고 돌려준다(숨김 업체도 사용중지 상태).
+      const res = await fetch(`/api/companies?keyword=${encodeURIComponent(kw)}`);
+      const json = await res.json();
+      if (!json.success) { setErr(json.message || '업체 검색 실패'); return; }
+      setCompanyResults((json.data.items as { id: string; name: string }[]).filter((c) => c.id !== item.companyId));
+    } catch {
+      setErr('네트워크 오류');
+    }
+  };
+
+  const save = async () => {
+    if (!reason.trim()) { setErr('수정 사유를 입력해 주세요.'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const res = await fetch(`/api/admin/sessions/${item.sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          birthDate,
+          phone,
+          vehicleNumber,
+          companyId: newCompany?.id ?? null,
+          reason,
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) { setErr(json.message || '수정 실패'); setSaving(false); return; }
+      const notices: string[] = json.data.notices ?? [];
+      onDone(['수정했습니다.', ...notices].join('\n'));
+    } catch {
+      setErr('네트워크 오류입니다. 잠시 후 다시 시도해 주세요.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay fixed inset-0 z-[60] bg-black/50 flex items-start justify-center p-4 overflow-y-auto" onClick={() => !saving && onClose()}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md my-8 p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-bold text-slate-800">수료 기록 수정</h3>
+        <p className="text-xs text-slate-500">
+          같은 사람(이름·생년월일·연락처 일치)의 다른 교육 기록도 함께 수정됩니다. 서약서·이행각서·과거 허가서는 바뀌지 않습니다.
+        </p>
+        <div>
+          <label className="label">이름 <span className="text-red-500">*</span></label>
+          <input className="input-base" maxLength={50} value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div>
+          <label className="label">생년월일 <span className="text-red-500">*</span></label>
+          <input type="date" max="9999-12-31" className="input-base" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
+        </div>
+        <div>
+          <label className="label">연락처 <span className="text-red-500">*</span></label>
+          <input className="input-base" inputMode="numeric" value={phone} onChange={(e) => setPhone(e.target.value)} />
+        </div>
+        <div>
+          <label className="label">차량번호</label>
+          <input className="input-base" maxLength={30} value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} />
+        </div>
+        <div>
+          <label className="label">교육 대상 (수정 불가)</label>
+          <p className="text-sm text-slate-600">{item.targetLabel}</p>
+        </div>
+        <div className="space-y-1.5">
+          <label className="label">소속 업체</label>
+          <p className="text-sm text-slate-700">
+            현재: {item.affiliation}
+            {newCompany && <span className="font-bold text-brand"> → {newCompany.name}</span>}
+            {newCompany && (
+              <button type="button" onClick={() => setNewCompany(null)} className="ml-2 text-xs text-slate-500 underline">변경 취소</button>
+            )}
+          </p>
+          <div className="flex gap-2 items-stretch">
+            <input
+              className="input-base flex-1 min-w-0"
+              placeholder="바꿀 업체명 검색"
+              value={companyKeyword}
+              onChange={(e) => setCompanyKeyword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); searchCompany(); } }}
+            />
+            <button type="button" onClick={searchCompany} className="shrink-0 rounded-xl border border-slate-300 text-slate-700 text-sm font-semibold px-4 whitespace-nowrap hover:bg-slate-50">검색</button>
+          </div>
+          {companyResults && (
+            companyResults.length === 0 ? (
+              <p className="text-xs text-slate-500">선택할 수 있는 업체가 없습니다.</p>
+            ) : (
+              <ul className="max-h-36 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
+                {companyResults.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      onClick={() => { setNewCompany({ id: c.id, name: c.name }); setCompanyResults(null); setCompanyKeyword(''); }}
+                      className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                    >{c.name}</button>
+                  </li>
+                ))}
+              </ul>
+            )
           )}
-          {isProtected && (
-            <p className="text-xs text-slate-400 text-center pt-1">
-              ※ 수료 이력이 있어 삭제할 수 없습니다.
-            </p>
-          )}
+        </div>
+        <div>
+          <label className="label">수정 사유 <span className="text-red-500">*</span></label>
+          <textarea className="input-base min-h-[72px]" placeholder="예: 이름 오타 정정" value={reason} onChange={(e) => setReason(e.target.value)} />
+        </div>
+        {err && <p className="text-sm text-red-600">{err}</p>}
+        <div className="flex gap-2 justify-end pt-1">
+          <button className="btn-secondary" onClick={onClose} disabled={saving}>취소</button>
+          <button className="btn-primary" onClick={save} disabled={saving}>{saving ? '저장 중…' : '저장'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 수료 기록 삭제 — 선택한 1건만. 전체 내용을 로그에 저장한 뒤 삭제된다. */
+function DeleteRecordModal({
+  item,
+  onClose,
+  onDone,
+}: {
+  item: Item;
+  onClose: () => void;
+  onDone: (message: string) => void;
+}) {
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const submit = async () => {
+    if (!reason.trim()) { setErr('삭제 사유를 입력해 주세요.'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const res = await fetch(`/api/admin/sessions/${item.sessionId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      });
+      const json = await res.json();
+      if (!json.success) { setErr(json.message || '삭제 실패'); setSaving(false); return; }
+      const notices: string[] = json.data.notices ?? [];
+      onDone([`${item.name} 기록을 삭제했습니다.`, ...notices].join('\n'));
+    } catch {
+      setErr('네트워크 오류입니다. 잠시 후 다시 시도해 주세요.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4" onClick={() => !saving && onClose()}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-bold text-red-700">수료 기록 삭제</h3>
+        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-slate-700 space-y-1">
+          <p>
+            <span className="font-bold text-red-700">{item.name}</span> ({item.targetLabel})
+            {item.completionNumber ? ` · ${item.completionNumber}` : ''} 기록 1건을 삭제합니다.
+          </p>
+          <p className="text-xs text-slate-600">수료·시험·시청 기록이 함께 지워지고, 지운 내용과 사유는 로그에 남습니다. 작업허가서에 쓰인 기록은 삭제되지 않습니다.</p>
+        </div>
+        <div>
+          <label className="label">삭제 사유 <span className="text-red-500">*</span></label>
+          <textarea className="input-base min-h-[72px]" placeholder="예: 잘못 등록된 테스트 기록" value={reason} onChange={(e) => setReason(e.target.value)} />
+        </div>
+        {err && <p className="text-sm text-red-600">{err}</p>}
+        <div className="flex gap-2 justify-end pt-1">
+          <button className="btn-secondary" onClick={onClose} disabled={saving}>취소</button>
+          <button
+            className="whitespace-nowrap text-sm px-5 py-2 rounded-lg font-bold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+            onClick={submit}
+            disabled={saving}
+          >{saving ? '처리 중…' : '삭제'}</button>
         </div>
       </div>
     </div>

@@ -137,7 +137,43 @@ export default function AdminCompaniesPage() {
   const [viewingMembers, setViewingMembers] = useState<CompanyItem | null>(null);
   const [importing, setImporting] = useState(false);
   const [page, setPage] = useState(1);
+  const [deleteMsg, setDeleteMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const PAGE_SIZE = 10;
+
+  // 사용중지 업체 삭제: 연결 기록 수를 먼저 받아 확인창에 보여 준다.
+  // 권한이 없으면 서버 거부 메시지를 그대로 표시한다.
+  const deleteCompany = async (it: CompanyItem) => {
+    setDeleteMsg(null);
+    try {
+      const pre = await fetch(`/api/admin/companies/${it.id}?preview=1`, { method: 'DELETE' });
+      const preJson = await pre.json();
+      if (!preJson.success) { setDeleteMsg({ ok: false, text: preJson.message || '확인 실패' }); return; }
+
+      const c = preJson.data.counts;
+      const total: number = preJson.data.total;
+      const ok = confirm(
+        total === 0
+          ? `[${it.name}]\n연결 기록이 없어 완전히 삭제합니다.\n소속 인원 명단과 업체 문서도 함께 지워지며 되돌릴 수 없습니다.`
+          : `[${it.name}]\n연결 기록 ${total}건: 교육 ${c.sessions} · 허가서 ${c.permits} · 허가서 참여 ${c.participants} · 서약 ${c.pledges} · 이행각서 ${c.undertakings}\n기록 보존을 위해 삭제하지 않고 목록에서 숨깁니다.`
+      );
+      if (!ok) return;
+
+      const res = await fetch(`/api/admin/companies/${it.id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!json.success) { setDeleteMsg({ ok: false, text: json.message || '처리 실패' }); return; }
+
+      const failNote = json.data.filesFailed > 0 ? ` (문서 파일 ${json.data.filesFailed}개는 지우지 못했습니다)` : '';
+      setDeleteMsg({
+        ok: true,
+        text: json.data.action === 'DELETED'
+          ? `${it.name} 업체를 삭제했습니다.${failNote}`
+          : `${it.name} 업체를 목록에서 숨겼습니다(연결 기록 ${json.data.total}건 보존).`,
+      });
+      await load();
+    } catch {
+      setDeleteMsg({ ok: false, text: '네트워크 오류입니다. 잠시 후 다시 시도해 주세요.' });
+    }
+  };
 
   const load = async (opts?: { status?: '' | CompanyStatus; type?: '' | CompanyType; kw?: string }) => {
     setLoading(true);
@@ -246,6 +282,11 @@ export default function AdminCompaniesPage() {
       </div>
 
       <div className="space-y-2">
+        {deleteMsg && (
+          <div className={`card text-sm ${deleteMsg.ok ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-red-50 border border-red-200 text-red-700'}`}>
+            {deleteMsg.text}
+          </div>
+        )}
         <p className="text-xs text-slate-500">총 {items.length}건 · 카드 클릭 시 수정, "인원" 클릭 시 소속 인원 보기</p>
         {items.slice((Math.min(page, Math.max(1, Math.ceil(items.length / PAGE_SIZE))) - 1) * PAGE_SIZE, Math.min(page, Math.max(1, Math.ceil(items.length / PAGE_SIZE))) * PAGE_SIZE).map((it) => {
           const rules = companyFieldRules(it.company_type);
@@ -308,7 +349,18 @@ export default function AdminCompaniesPage() {
                 등록주체: {it.created_by === 'APPLICANT' ? '신청자' : '관리자'}
               </p>
             </div>
-            <div className="pt-2 border-t border-slate-100 flex justify-end">
+            <div className="pt-2 border-t border-slate-100 flex justify-end gap-3">
+              {it.status === 'DISABLED' && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteCompany(it);
+                  }}
+                  className="text-xs font-bold text-red-600 hover:underline"
+                >
+                  🗑 삭제
+                </button>
+              )}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -892,7 +944,7 @@ function MemberAddForm({
           onChange={(e) => setName(e.target.value)}
         />
         <input
-          type="date"
+          type="date" max="9999-12-31"
           className="input-base text-sm"
           value={birthDate}
           onChange={(e) => setBirthDate(e.target.value)}
@@ -1358,6 +1410,7 @@ interface ImportPreviewResp {
     members:
       | { count: number; rows: any[] }
       | { inserted: number; updated: number; skipped: number };
+    skippedHidden?: { companies: number; members: number };
     errors: { sheet: string; rowIndex: number; field?: string; message: string }[];
     warnings: { sheet: string; rowIndex: number; message: string }[];
   };
@@ -1518,6 +1571,11 @@ function ImportModal({
                     건너뜀 {(preview.data.members as any).skipped ?? 0}
                   </p>
                 </div>
+              )}
+              {!!preview.data.skippedHidden && (preview.data.skippedHidden.companies > 0 || preview.data.skippedHidden.members > 0) && (
+                <p className="font-bold text-amber-700">
+                  숨김 처리된 업체라 건너뜀: 업체 {preview.data.skippedHidden.companies}건 · 인원 {preview.data.skippedHidden.members}건
+                </p>
               )}
 
               {preview.data.errors.length > 0 && (

@@ -24,7 +24,7 @@ export const ADMIN_PERMISSIONS: PermissionDef[] = [
   { key: 'WORKPERMITS_DEPT_CONFIRM', label: '작업허가 관련부서 현장확인(공무)', group: 'optional' },
   { key: 'COMPANIES_EDIT', label: '업체 추가·수정·인원·문서', group: 'optional' },
   { key: 'COMPANIES_MANAGE', label: '업체 상태·삭제·병합', group: 'optional' },
-  { key: 'SESSION_DELETE', label: '수료(세션) 삭제', group: 'optional' },
+  { key: 'SESSION_DELETE', label: '수료 기록 수정·삭제', group: 'optional' },
   { key: 'EXCEL_IMPORT', label: '엑셀 업로드(반영)', group: 'optional' },
   { key: 'QUESTIONS_MANAGE', label: '시험문제 관리', group: 'optional' },
   { key: 'COURSES_MANAGE', label: '교육과정·영상 관리', group: 'optional' },

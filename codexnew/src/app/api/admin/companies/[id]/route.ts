@@ -5,6 +5,7 @@ import { isCompanyType, isCompanyStatus, validateCompanyInput, enforceCompanyNam
 import { isValidBizNo, formatBizNo } from '@/lib/bizno';
 import { checkBizStatus } from '@/lib/bizno-server';
 import { sendSms } from '@/lib/sms';
+import { DOC_BUCKET } from '@/lib/company-documents';
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 
@@ -37,6 +38,73 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     );
   }
   return NextResponse.json({ success: true, data });
+}
+
+/**
+ * DELETE /api/admin/companies/:id[?preview=1]  (권한 COMPANIES_MANAGE)
+ * 사용중지(DISABLED) 업체만.
+ * - preview=1 : 연결 기록 수만 돌려준다(확인창용). 아무것도 바꾸지 않음.
+ * - 연결 기록 0건 : 실제 삭제. 인원·문서 메타는 CASCADE, Storage 파일은 여기서 지운다.
+ * - 1건 이상 : archived_at 만 기록(숨김). status 는 DISABLED 유지.
+ */
+export async function DELETE(req: Request, ctx: { params: { id: string } }) {
+  const auth = await requirePermission('COMPANIES_MANAGE');
+  if (!auth.ok) return auth.response;
+
+  if (!/^[0-9a-f-]{36}$/i.test(ctx.params.id)) {
+    return NextResponse.json(
+      { success: false, code: 'NOT_FOUND', message: '업체를 찾을 수 없습니다.' },
+      { status: 404 }
+    );
+  }
+
+  const preview = new URL(req.url).searchParams.get('preview') === '1';
+  const supabase = createServiceClient();
+  const { data, error } = await supabase.rpc('admin_delete_company', {
+    p_company_id: ctx.params.id,
+    p_preview: preview,
+  });
+
+  if (error) {
+    console.error('[admin/companies/:id DELETE]', error);
+    return NextResponse.json(
+      { success: false, code: 'DELETE_FAILED', message: '처리하지 못했습니다. 바뀐 내용은 없습니다.' },
+      { status: 500 }
+    );
+  }
+
+  const r = data as any;
+  if (!r?.ok) {
+    const map: Record<string, [string, number]> = {
+      NOT_FOUND: ['업체를 찾을 수 없습니다.', 404],
+      ALREADY_ARCHIVED: ['이미 숨김 처리된 업체입니다.', 409],
+      NOT_DISABLED: ['사용중지 상태인 업체만 삭제할 수 있습니다.', 409],
+    };
+    const [message, status] = map[r?.code] ?? ['처리하지 못했습니다.', 400];
+    return NextResponse.json({ success: false, code: r?.code ?? 'DELETE_FAILED', message }, { status });
+  }
+
+  if (preview) {
+    return NextResponse.json({ success: true, data: r });
+  }
+
+  // DB 삭제가 끝난 뒤 Storage 파일 삭제 — 실패해도 업체는 이미 지워졌으므로 건수만 알린다.
+  const paths: string[] = Array.isArray(r.paths) ? r.paths : [];
+  let filesFailed = 0;
+  if (paths.length > 0) {
+    const { data: removed, error: rmErr } = await supabase.storage.from(DOC_BUCKET).remove(paths);
+    if (rmErr) {
+      console.error('[admin/companies/:id DELETE] storage:', rmErr);
+      filesFailed = paths.length;
+    } else {
+      filesFailed = Math.max(0, paths.length - (removed?.length ?? 0));
+    }
+  }
+
+  return NextResponse.json({
+    success: true,
+    data: { action: r.action, name: r.name, counts: r.counts, total: r.total, filesRemoved: paths.length - filesFailed, filesFailed },
+  });
 }
 
 /**

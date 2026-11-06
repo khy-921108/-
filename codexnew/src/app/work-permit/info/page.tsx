@@ -146,7 +146,7 @@ export default function WorkPermitInfo() {
         <div className="space-y-3">
           <div>
             <label className="label">작업일 (하루)</label>
-            <input type="date" className="input-base" value={workDate} onChange={(e) => setWorkDate(e.target.value)} />
+            <input type="date" max="9999-12-31" className="input-base" value={workDate} onChange={(e) => setWorkDate(e.target.value)} />
             <p className="mt-1 text-xs text-slate-500">※ 작업허가는 <b>하루 단위</b>입니다. 여러 날 작업은 <b>작업하는 날마다</b> 다시 신청해 주세요.</p>
           </div>
           <div className="grid grid-cols-2 gap-3">

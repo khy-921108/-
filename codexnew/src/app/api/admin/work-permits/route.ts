@@ -8,6 +8,85 @@ import { stageFromRow } from '@/lib/work-permit-stage';
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 
+const PERMIT_PHOTO_BUCKET = 'work-permit-photos';
+const MAX_DELETE = 50;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * DELETE /api/admin/work-permits  (권한 WORKPERMITS_APPROVE) — 문자 없는 삭제
+ * Body: { ids: string[], reason: string }  (최대 50건, 일괄 삭제도 사유 1회)
+ * - 판정·로그·삭제는 SQL 함수 admin_delete_work_permits 한 트랜잭션. 안 맞는 건은 건별 사유 반환.
+ * - 🔴 문자·알림 발송 없음. sendSms 를 부르지 말 것.
+ * - 서약·이행각서는 건드리지 않음. Storage 사진만 여기서 지운다.
+ */
+export async function DELETE(req: Request) {
+  const auth = await requirePermission('WORKPERMITS_APPROVE');
+  if (!auth.ok) return auth.response;
+
+  const body = await req.json().catch(() => ({}));
+  const ids: string[] = Array.isArray(body.ids)
+    ? Array.from(new Set(body.ids.filter((v: unknown): v is string => typeof v === 'string' && UUID_RE.test(v))))
+    : [];
+  const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+
+  if (!reason) {
+    return NextResponse.json({ success: false, code: 'NO_REASON', message: '삭제 사유를 입력해 주세요.' }, { status: 400 });
+  }
+  if (ids.length === 0) {
+    return NextResponse.json({ success: false, code: 'NO_TARGET', message: '삭제할 허가서를 선택해 주세요.' }, { status: 400 });
+  }
+  if (ids.length > MAX_DELETE) {
+    return NextResponse.json(
+      { success: false, code: 'TOO_MANY', message: `한 번에 최대 ${MAX_DELETE}건까지 삭제할 수 있습니다.` },
+      { status: 400 }
+    );
+  }
+
+  const supabase = createServiceClient();
+  const { data, error } = await supabase.rpc('admin_delete_work_permits', {
+    p_ids: ids,
+    p_reason: reason,
+    p_actor: auth.admin.email,
+  });
+
+  if (error) {
+    console.error('[admin/work-permits DELETE]', error);
+    return NextResponse.json(
+      { success: false, code: 'DELETE_FAILED', message: '삭제하지 못했습니다. 바뀐 내용은 없습니다.' },
+      { status: 500 }
+    );
+  }
+
+  const r = data as any;
+  if (!r?.ok) {
+    return NextResponse.json(
+      { success: false, code: r?.code ?? 'DELETE_FAILED', message: '삭제하지 못했습니다.' },
+      { status: 400 }
+    );
+  }
+
+  const deleted: { id: string; permitNumber: string }[] = Array.isArray(r.deleted) ? r.deleted : [];
+  const refused: { id: string; permitNumber: string | null; reasons: string[] }[] = Array.isArray(r.refused) ? r.refused : [];
+
+  // Storage permits/{id}/ — 있으면 삭제. 실패해도 허가서는 이미 지워졌으므로 로그만 남긴다.
+  for (const d of deleted) {
+    try {
+      const folder = `permits/${d.id}`;
+      const { data: files, error: listErr } = await supabase.storage.from(PERMIT_PHOTO_BUCKET).list(folder, { limit: 1000 });
+      if (listErr) throw listErr;
+      const paths = (files ?? []).map((f) => `${folder}/${f.name}`);
+      if (paths.length > 0) {
+        const { error: rmErr } = await supabase.storage.from(PERMIT_PHOTO_BUCKET).remove(paths);
+        if (rmErr) throw rmErr;
+      }
+    } catch (e) {
+      console.error('[admin/work-permits DELETE] storage:', d.permitNumber, e);
+    }
+  }
+
+  return NextResponse.json({ success: true, data: { deleted, refused } });
+}
+
 /**
  * GET /api/admin/work-permits  (requireAdmin) — 신청 목록
  * res: { success, data:{ items:[{permitId,permitNumber,permitType,companyName,workName,

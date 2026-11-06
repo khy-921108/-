@@ -359,7 +359,7 @@ export default function SiteTbmPage() {
           <div><label className="label">성명</label>
             <input className="input-base" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="홍길동" /></div>
           <div><label className="label">생년월일</label>
-            <input type="date" className="input-base" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} /></div>
+            <input type="date" max="9999-12-31" className="input-base" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} /></div>
           <div><label className="label">연락처 (숫자만)</label>
             <input type="tel" inputMode="numeric" className="input-base" value={form.phone}
               onChange={(e) => setForm({ ...form, phone: e.target.value.replace(/[^0-9]/g, '').slice(0, 11) })} placeholder="01012345678" /></div>
@@ -528,7 +528,7 @@ export default function SiteTbmPage() {
                   <p className="text-sm font-bold text-slate-700">👷 합류 작업자</p>
                   <input className="input-base text-sm" placeholder="이름" value={joinForm.name}
                     onChange={(e) => { setJoinForm({ ...joinForm, name: e.target.value }); setJoinCand(null); }} />
-                  <input type="date" className="input-base text-sm" value={joinForm.birthDate}
+                  <input type="date" max="9999-12-31" className="input-base text-sm" value={joinForm.birthDate}
                     onChange={(e) => { setJoinForm({ ...joinForm, birthDate: e.target.value }); setJoinCand(null); }} aria-label="생년월일" />
                   <input type="tel" inputMode="numeric" className="input-base text-sm" placeholder="연락처(숫자만)" value={joinForm.phone}
                     onChange={(e) => { setJoinForm({ ...joinForm, phone: e.target.value.replace(/[^0-9]/g, '').slice(0, 11) }); setJoinCand(null); }} />

@@ -22,6 +22,7 @@ export async function GET() {
   const { data: companies, error: companiesErr } = await supabase
     .from('companies')
     .select('id, name, biz_no, company_type, manager_name, phone, address, tel, biz_status, status, note')
+    .is('archived_at', null) // 숨김 업체 제외
     .order('name', { ascending: true })
     .limit(5000);
   if (companiesErr) {
@@ -64,7 +65,7 @@ export async function GET() {
       status: c.status,
       note: c.note,
     })),
-    members: (members ?? []).map((m: any) => ({
+    members: (members ?? []).filter((m: any) => !m.company_id || idToName.has(m.company_id)).map((m: any) => ({
       member_type: m.member_type,
       company_name: (m.company_id && idToName.get(m.company_id)) ?? '',
       name: m.name,

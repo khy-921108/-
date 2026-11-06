@@ -107,6 +107,12 @@ export default function AdminWorkPermitDetailPage() {
   const [voidSaving, setVoidSaving] = useState(false);
   const [voidErr, setVoidErr] = useState('');
 
+  // 허가서 삭제(문자 없음)
+  const [delOpen, setDelOpen] = useState(false);
+  const [delReason, setDelReason] = useState('');
+  const [delSaving, setDelSaving] = useState(false);
+  const [delErr, setDelErr] = useState('');
+
   const load = useCallback(async () => {
     // 읽기(조회)에 15초 클라 타임아웃 — Supabase 지연 시 화면이 매달리지 않게
     const tf = (url: string) => {
@@ -307,6 +313,30 @@ export default function AdminWorkPermitDetailPage() {
     }
   };
 
+  // 삭제 — 조건 판정은 서버가 한다. 안 맞으면 사유를 창에 그대로 보여 준다. 문자 없음.
+  const submitDelete = async () => {
+    if (!delReason.trim()) { setDelErr('삭제 사유를 입력해 주세요.'); return; }
+    setDelSaving(true); setDelErr('');
+    try {
+      const res = await fetch('/api/admin/work-permits', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [id], reason: delReason.trim() }),
+      });
+      const json = await res.json();
+      if (!json.success) { setDelErr(json.message || '삭제 실패'); setDelSaving(false); return; }
+      const refused = json.data.refused?.[0];
+      if (refused) {
+        setDelErr(`삭제할 수 없습니다: ${(refused.reasons ?? []).join(', ')}`);
+        setDelSaving(false);
+        return;
+      }
+      window.location.href = '/admin/work-permits';
+    } catch {
+      setDelErr('네트워크 오류입니다. 잠시 후 다시 시도해 주세요.'); setDelSaving(false);
+    }
+  };
+
   const submitRollback = async () => {
     if (!rbModal) return;
     if (!rbReason.trim()) { setRbErr('되돌리기 사유를 입력해 주세요.'); return; }
@@ -345,6 +375,12 @@ export default function AdminWorkPermitDetailPage() {
             )}
             <a href={`/work-permit/print/${id}`} target="_blank" rel="noreferrer" className="shrink-0 whitespace-nowrap rounded-xl border-2 border-brand bg-white text-brand text-sm font-bold px-4 py-2 hover:bg-brand/5">🖨 인쇄</a>
             <a href={`/api/work-permits/${id}/xlsx`} className="shrink-0 whitespace-nowrap rounded-xl border-2 border-brand bg-white text-brand text-sm font-bold px-4 py-2 hover:bg-brand/5">📥 회사양식 xlsx</a>
+            {hasApprove && !issuerSigned && !started && (
+              <button
+                onClick={() => { setDelReason(''); setDelErr(''); setDelOpen(true); }}
+                className="shrink-0 whitespace-nowrap rounded-xl border-2 border-red-500 bg-white text-red-600 text-sm font-bold px-4 py-2 hover:bg-red-50"
+              >🗑 삭제</button>
+            )}
           </div>
         </div>
         <p className="text-sm text-slate-600 mt-2">{info.workName} · {data.companyName}</p>
@@ -715,6 +751,31 @@ export default function AdminWorkPermitDetailPage() {
         </details>
       )}
 
+      {/* 허가서 삭제 모달 */}
+      {delOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !delSaving && setDelOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-bold text-red-700">🗑 작업허가 삭제</h3>
+            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-slate-700 space-y-1">
+              <p><span className="font-bold text-red-700">{data.permitNumber}</span> 허가서를 삭제합니다. 문자는 가지 않습니다.</p>
+              <p className="text-xs text-slate-600">지운 내용은 로그에 남습니다. 1차 승인이나 TBM 기록이 있으면 삭제되지 않습니다.</p>
+            </div>
+            <div>
+              <label className="label">삭제 사유 <span className="text-red-500">*</span></label>
+              <textarea className="input-base min-h-[72px]" placeholder="예: 업체 요청으로 신청 취소" value={delReason} onChange={(e) => setDelReason(e.target.value)} />
+            </div>
+            {delErr && <p className="text-sm text-red-600">{delErr}</p>}
+            <div className="flex gap-2 justify-end pt-1">
+              <button className="btn-secondary" onClick={() => setDelOpen(false)} disabled={delSaving}>취소</button>
+              <button
+                className="whitespace-nowrap text-sm px-5 py-2 rounded-lg font-bold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                onClick={submitDelete} disabled={delSaving}
+              >{delSaving ? '처리 중…' : '삭제'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 되돌리기 모달 */}
       {rbModal && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !rbSaving && setRbModal(null)}>
@@ -808,7 +869,7 @@ export default function AdminWorkPermitDetailPage() {
             {modal.type === 'report' && (
               <>
                 <div><label className="label">완료시간 (미입력 시 현재시각)</label>
-                  <input type="datetime-local" className="input-base" value={completedAt} onChange={(e) => setCompletedAt(e.target.value)} /></div>
+                  <input type="datetime-local" max="9999-12-31T23:59" className="input-base" value={completedAt} onChange={(e) => setCompletedAt(e.target.value)} /></div>
                 <div><label className="label">복원(조치)상태</label>
                   <textarea className="input-base min-h-[56px]" placeholder="원상복구·잔여위험 등" value={restoreState} onChange={(e) => setRestoreState(e.target.value)} /></div>
               </>
