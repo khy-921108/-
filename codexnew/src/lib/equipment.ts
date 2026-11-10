@@ -1,3 +1,4 @@
+import { normalizeKrPhone } from './phone';
 /**
  * 장비/인원 구분 상수 — 코드와 라벨은 이 파일에서만 관리.
  * 신규 장비종류 추가 시 EQUIPMENT_TYPES 만 수정.
@@ -76,6 +77,6 @@ export function isMemberType(value: unknown): value is MemberType {
  */
 export function normalizePhone(value: unknown): string | null {
   if (typeof value !== 'string') return null;
-  const digits = value.replace(/[^0-9]/g, '');
+  const digits = normalizeKrPhone(value);
   return digits.length === 0 ? null : digits;
 }

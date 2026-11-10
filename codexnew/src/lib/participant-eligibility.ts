@@ -1,3 +1,4 @@
+import { normalizeKrPhone } from './phone';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -33,7 +34,7 @@ export interface EligibilityResult {
 }
 
 function digits(s: unknown): string {
-  return typeof s === 'string' ? s.replace(/[^0-9]/g, '') : '';
+  return normalizeKrPhone(s);
 }
 
 /**

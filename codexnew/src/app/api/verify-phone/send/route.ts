@@ -10,6 +10,7 @@
  * - 코드 평문 저장 금지: sha256(salt + code)
  */
 
+import { normalizeKrPhone } from '@/lib/phone';
 import { NextResponse } from 'next/server';
 import { createHash, randomBytes, randomInt } from 'crypto';
 import { createServiceClient } from '@/lib/supabase/server';
@@ -31,7 +32,7 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const phone = onlyDigits(typeof body.phone === 'string' ? body.phone : '');
+    const phone = normalizeKrPhone(typeof body.phone === 'string' ? body.phone : '');
     if (phone.length < 10 || phone.length > 11 || !phone.startsWith('01')) {
       return NextResponse.json(
         { success: false, code: 'INVALID_PHONE', message: '휴대폰 번호를 정확히 입력해 주세요.' },

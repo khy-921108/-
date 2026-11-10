@@ -1,3 +1,4 @@
+import { normalizeKrPhone } from '@/lib/phone';
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { evaluateParticipant } from '@/lib/participant-eligibility';
@@ -48,7 +49,7 @@ export async function POST(req: Request) {
     const workLocation = (info.workLocation ?? '').trim();
     const workContent = (info.workContent ?? '').trim();
     const applicantName = (info.applicantName ?? '').trim();
-    const applicantPhone = (info.applicantPhone ?? '').replace(/[^0-9]/g, '');
+    const applicantPhone = normalizeKrPhone(info.applicantPhone ?? '');
     const applicantTitle = (info.applicantTitle ?? '').trim() || null;
     const applicantBirthDate = (info.applicantBirthDate ?? '').trim() || null;
     const equipmentNo = (info.equipmentNo ?? '').trim() || null;

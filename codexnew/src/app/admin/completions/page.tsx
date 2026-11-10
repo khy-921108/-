@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { normalizeKrPhone } from '@/lib/phone';
+import { useCallback, useEffect, useState } from 'react';
 import { formatDate } from '@/lib/format';
 import StatCardButton from '@/components/StatCardButton';
 
@@ -405,6 +406,8 @@ function DetailModal({
             )}
           </Section>
 
+          <DeviceLine sessionId={item.sessionId} />
+
           <Section title="교육 정보">
             <InfoRow label="교육 대상" value={item.targetLabel} />
             <InfoRow label="응 시 일" value={formatDate(item.createdAt)} />
@@ -468,6 +471,52 @@ function DetailModal({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** 이 수료자로 기억된 휴대폰 수와 [모두 해제] — 권한(SESSION_DELETE)이 없으면 표시하지 않는다. */
+function DeviceLine({ sessionId }: { sessionId: string }) {
+  const [count, setCount] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/admin/sessions/${sessionId}/devices`, { cache: 'no-store' });
+      if (!res.ok) { setCount(null); return; }
+      const json = await res.json();
+      setCount(typeof json?.data?.count === 'number' ? json.data.count : null);
+    } catch {
+      setCount(null);
+    }
+  }, [sessionId]);
+  useEffect(() => { load(); }, [load]);
+  if (count === null) return null;
+  const revokeAll = async () => {
+    if (!confirm(`이 수료자로 기억된 휴대폰 ${count}대를 모두 해제할까요? 해당 휴대폰은 다음 접속 때 다시 입력해야 합니다.`)) return;
+    setBusy(true); setMsg('');
+    try {
+      const res = await fetch(`/api/admin/sessions/${sessionId}/devices`, { method: 'DELETE' });
+      const json = await res.json();
+      setMsg(json?.success ? `${json.data.revoked}대를 해제했습니다.` : json?.message || '해제하지 못했습니다.');
+      await load();
+    } catch {
+      setMsg('네트워크 오류입니다.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="print:hidden rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-slate-600">기억된 휴대폰 <b>{count}</b>대</span>
+        {count > 0 && (
+          <button type="button" onClick={revokeAll} disabled={busy} className="rounded-lg border border-red-300 bg-white px-3 py-1 text-xs font-bold text-red-600 disabled:opacity-50">
+            {busy ? '해제 중…' : '모두 해제'}
+          </button>
+        )}
+      </div>
+      {msg && <p className="mt-1 text-xs text-slate-500">{msg}</p>}
     </div>
   );
 }
@@ -552,7 +601,7 @@ function EditRecordModal({
         </div>
         <div>
           <label className="label">연락처 <span className="text-red-500">*</span></label>
-          <input className="input-base" inputMode="numeric" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <input type="tel" className="input-base" inputMode="numeric" value={phone} onChange={(e) => setPhone(normalizeKrPhone(e.target.value))} />
         </div>
         <div>
           <label className="label">차량번호</label>

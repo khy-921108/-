@@ -1,3 +1,5 @@
+import { revokePersonDevices } from '@/lib/device';
+import { normalizeKrPhone } from '@/lib/phone';
 import { NextResponse } from 'next/server';
 import { requirePermission } from '@/lib/supabase/auth';
 import { createServiceClient } from '@/lib/supabase/server';
@@ -29,7 +31,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   const body = await req.json().catch(() => ({}));
   const name = typeof body.name === 'string' ? body.name.trim() : '';
   const birthDate = typeof body.birthDate === 'string' ? body.birthDate.trim() : '';
-  const phone = typeof body.phone === 'string' ? body.phone.replace(/[^0-9]/g, '') : '';
+  const phone = normalizeKrPhone(typeof body.phone === 'string' ? body.phone : '');
   const vehicleNumber = typeof body.vehicleNumber === 'string' ? body.vehicleNumber.trim() : '';
   const companyId = typeof body.companyId === 'string' && body.companyId.trim() ? body.companyId.trim() : null;
   const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
@@ -42,6 +44,12 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   if (companyId && !UUID_RE.test(companyId)) return fail('INVALID_INPUT', '소속 업체가 올바르지 않습니다.');
 
   const supabase = createServiceClient();
+  // 수정 전 본인 정보 — 바뀌면 이 정보로 기억된 휴대폰을 해제한다(RPC 전에 읽어 둔다).
+  const { data: before } = await supabase
+    .from('training_sessions')
+    .select('name, birth_date, phone')
+    .eq('id', ctx.params.id)
+    .maybeSingle();
   const { data, error } = await supabase.rpc('admin_edit_training_record', {
     p_session_id: ctx.params.id,
     p_name: name,
@@ -67,6 +75,18 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   }
 
   const notices: string[] = [];
+  if (before) {
+    const old = { name: String(before.name ?? ''), birthDate: String(before.birth_date ?? '').slice(0, 10), phone: String(before.phone ?? '') };
+    if (old.name.trim() !== name || old.birthDate !== birthDate || normalizeKrPhone(old.phone) !== phone) {
+      try {
+        const n = await revokePersonDevices(supabase, old, 'EDITED');
+        if (n > 0) notices.push(`이 사람으로 기억된 휴대폰 ${n}대를 해제했습니다. 다음 접속 때 다시 기억해야 합니다.`);
+      } catch (e: any) {
+        console.error('[admin/sessions PATCH] device revoke:', e?.message ?? 'unknown');
+        notices.push('기억된 휴대폰 해제에 실패했습니다. 수료 현황에서 [모두 해제]를 눌러 주세요.');
+      }
+    }
+  }
   if (r.personChanged) notices.push('다음 신청 때 개인 서약을 새로 받아야 합니다.');
   if (r.companyChanged) notices.push('이행각서 재발급이 필요할 수 있습니다.');
   if (r.membersMerged > 0) notices.push('업체 명단에 같은 사람이 이미 있어 중복 행을 정리했습니다.');

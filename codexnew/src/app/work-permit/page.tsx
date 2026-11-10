@@ -1,8 +1,11 @@
 'use client';
 
+import { normalizeKrPhone } from '@/lib/phone';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { readDraft, writeDraft } from '@/lib/work-permit-draft';
+import { clearDraft, readDraft, writeDraft } from '@/lib/work-permit-draft';
+import { isSameAsDevice, useDevice } from '@/lib/use-device';
+import { useRememberDevice } from '@/components/RememberDevice';
 import { companyTypeLabel, companyFieldRules, COMPANY_TYPES, type CompanyType } from '@/lib/company';
 import BizNoField from '@/components/BizNoField';
 
@@ -22,6 +25,14 @@ export default function WorkPermitStart() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [gate, setGate] = useState<'IDLE' | 'OK'>('IDLE');
+
+  // 기억된 휴대폰이면 자동 본인확인 / "다른 사람으로 신청"
+  const { me, loading: devLoading } = useDevice();
+  const remember = useRememberDevice();
+  const [manual, setManual] = useState(false);
+  const [byDevice, setByDevice] = useState(false);
+  const [hadDraft, setHadDraft] = useState<boolean | null>(null);
+  const autoTried = useRef(false);
 
   // 본인 업체(기본) + 변경/신규
   const [company, setCompany] = useState<{ id: string; name: string } | null>(null);
@@ -43,6 +54,7 @@ export default function WorkPermitStart() {
 
   useEffect(() => {
     const d = readDraft();
+    setHadDraft(!!d.applicant);
     if (d.applicant) {
       setName(d.applicant.name);
       setBirthDate(d.applicant.birthDate);
@@ -54,11 +66,11 @@ export default function WorkPermitStart() {
     }
   }, []);
 
-  const formatPhone = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 11);
+  const formatPhone = normalizeKrPhone;
 
-  const onVerify = async () => {
+  const onVerify = async (who = { name, birthDate, phone }, auto = false) => {
     setError('');
-    if (!name.trim() || !birthDate || phone.length < 10) {
+    if (!who.name.trim() || !who.birthDate || who.phone.length < 10) {
       setError('이름·생년월일·연락처를 입력해 주세요.');
       return;
     }
@@ -67,7 +79,7 @@ export default function WorkPermitStart() {
       const res = await fetch('/api/work-permits/verify-applicant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, birthDate, phone }),
+        body: JSON.stringify(who),
       });
       const json = await res.json();
       if (!json.success) {
@@ -85,10 +97,12 @@ export default function WorkPermitStart() {
       }
       // OK
       const comp = json.data.company as { id: string; name: string };
+      if (!auto) await remember.run(who);
+      setByDevice(auto || isSameAsDevice(me, who));
       setCompany(comp);
       setGate('OK');
       writeDraft({
-        applicant: { name: name.trim(), birthDate, phone, companyId: comp.id },
+        applicant: { name: who.name.trim(), birthDate: who.birthDate, phone: who.phone, companyId: comp.id },
         company: comp,
       });
     } catch (e) {
@@ -97,6 +111,30 @@ export default function WorkPermitStart() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // 기억된 휴대폰: 작성 중인 신청이 없을 때만 자동 본인확인
+  useEffect(() => {
+    if (devLoading || hadDraft === null || autoTried.current) return;
+    autoTried.current = true;
+    if (!me || manual || hadDraft) return;
+    setName(me.name);
+    setBirthDate(me.birthDate);
+    setPhone(me.phone);
+    onVerify({ name: me.name, birthDate: me.birthDate, phone: me.phone }, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devLoading, me, hadDraft]);
+
+  const applyAsOther = () => {
+    clearDraft();
+    setManual(true);
+    setByDevice(false);
+    setGate('IDLE');
+    setCompany(null);
+    setName('');
+    setBirthDate('');
+    setPhone('');
+    setError('');
   };
 
   // 업체 변경 검색 (디바운스)
@@ -228,19 +266,21 @@ export default function WorkPermitStart() {
       </details>
 
       {gate !== 'OK' ? (
-        <div className="space-y-4">
+        <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (!loading) onVerify(); }}>
           <div>
             <label className="label">성명</label>
-            <input className="input-base" value={name} onChange={(e) => setName(e.target.value)} placeholder="홍길동" />
+            <input name="name" autoComplete="name" className="input-base" value={name} onChange={(e) => setName(e.target.value)} placeholder="홍길동" />
           </div>
           <div>
             <label className="label">생년월일</label>
-            <input type="date" max="9999-12-31" className="input-base" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
+            <input type="date" max="9999-12-31" name="bday" autoComplete="bday" className="input-base" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
           </div>
           <div>
             <label className="label">연락처 (숫자만)</label>
             <input
               type="tel"
+              name="tel"
+              autoComplete="tel"
               inputMode="numeric"
               className="input-base"
               value={phone}
@@ -248,8 +288,9 @@ export default function WorkPermitStart() {
               placeholder="01012345678"
             />
           </div>
+          {!isSameAsDevice(me, { name, birthDate, phone }) && remember.checkbox}
           {error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}
-          <button type="button" onClick={onVerify} disabled={loading} className="btn-primary">
+          <button type="submit" disabled={loading} className="btn-primary">
             {loading ? '확인 중...' : '본인확인'}
           </button>
           <button
@@ -259,11 +300,17 @@ export default function WorkPermitStart() {
           >
             이미 신청한 내역 조회 →
           </button>
-        </div>
+        </form>
       ) : (
         <div className="space-y-4">
           <div className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">
             ✅ 교육 수료 확인 완료 — <b>{name}</b> 님
+            {byDevice && (
+              <span className="block text-xs text-emerald-700">
+                기억된 휴대폰으로 확인했습니다 ·{' '}
+                <button type="button" onClick={applyAsOther} className="underline">다른 사람으로 신청</button>
+              </span>
+            )}
           </div>
 
           <div>
@@ -325,7 +372,7 @@ export default function WorkPermitStart() {
                     {newRules.isIndividual ? (
                       <div>
                         <label className="label">이름 *</label>
-                        <input className="input-base" value={newPersonName} onChange={(e) => setNewPersonName(e.target.value)} placeholder="홍길동" />
+                        <input name="company_person_name" autoComplete="off" className="input-base" value={newPersonName} onChange={(e) => setNewPersonName(e.target.value)} placeholder="홍길동" />
                         {newPersonName.trim() && <p className="mt-1 text-xs text-slate-500">등록명: <b>개인({newPersonName.trim()})</b> · 본인이 담당자입니다.</p>}
                       </div>
                     ) : (
@@ -339,12 +386,12 @@ export default function WorkPermitStart() {
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <label className="label">담당자명{newRules.managerRequired ? ' *' : ''}</label>
-                          <input className="input-base" value={newManager} onChange={(e) => setNewManager(e.target.value)} />
+                          <input name="company_manager_name" autoComplete="off" className="input-base" value={newManager} onChange={(e) => setNewManager(e.target.value)} />
                         </div>
                         <div>
                           <label className="label">담당자 연락처{newRules.managerRequired ? ' *' : ''}</label>
-                          <input type="tel" inputMode="numeric" className="input-base" value={newPhone}
-                            onChange={(e) => setNewPhone(e.target.value.replace(/[^0-9]/g, '').slice(0, 11))} placeholder="01012345678" />
+                          <input type="tel" name="company_manager_tel" autoComplete="off" inputMode="numeric" className="input-base" value={newPhone}
+                            onChange={(e) => setNewPhone(normalizeKrPhone(e.target.value))} placeholder="01012345678" />
                         </div>
                       </div>
                     )}
@@ -361,8 +408,8 @@ export default function WorkPermitStart() {
                             </div>
                             <div>
                               <label className="label">대표번호 (권장 — 정식등록 시 필수)</label>
-                              <input type="tel" inputMode="numeric" className="input-base" value={newTel}
-                                onChange={(e) => setNewTel(e.target.value.replace(/[^0-9]/g, '').slice(0, 12))} placeholder="0522345678" />
+                              <input type="tel" name="company_tel" autoComplete="off" inputMode="numeric" className="input-base" value={newTel}
+                                onChange={(e) => setNewTel(normalizeKrPhone(e.target.value))} placeholder="0522345678" />
                             </div>
                           </>
                         )}
@@ -390,6 +437,7 @@ export default function WorkPermitStart() {
           </button>
         </div>
       )}
+      {remember.dialog}
     </main>
   );
 }

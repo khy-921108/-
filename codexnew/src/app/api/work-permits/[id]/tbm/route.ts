@@ -1,3 +1,4 @@
+import { normalizeKrPhone } from '@/lib/phone';
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/supabase/auth';
@@ -44,7 +45,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
 
   const name = (body?.name ?? '').toString().trim();
   const birthDate = (body?.birthDate ?? '').toString().trim();
-  const phone = (body?.phone ?? '').toString().replace(/[^0-9]/g, '');
+  const phone = normalizeKrPhone((body?.phone ?? '').toString());
   const action = body?.action;
 
   // 인증 경로 ①: 관리자 로그인 세션(현장 입회 중 직접 등록) — 3요소 입력 불필요.
@@ -278,7 +279,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     }
     const jName = (body?.joinName ?? '').toString().trim();
     const jBirth = (body?.joinBirthDate ?? '').toString().trim();
-    const jPhone = (body?.joinPhone ?? '').toString().replace(/[^0-9]/g, '');
+    const jPhone = normalizeKrPhone((body?.joinPhone ?? '').toString());
     if (!jName || !jBirth || jPhone.length < 10) {
       return NextResponse.json({ success: false, code: 'INVALID_INPUT', message: '작업자의 이름·생년월일·연락처를 정확히 입력해 주세요.' }, { status: 400 });
     }
@@ -406,7 +407,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     if (addWorker) {
       jName = (body?.joinName ?? '').toString().trim();
       jBirth = (body?.joinBirthDate ?? '').toString().trim();
-      jPhone = (body?.joinPhone ?? '').toString().replace(/[^0-9]/g, '');
+      jPhone = normalizeKrPhone((body?.joinPhone ?? '').toString());
       if (!jName || !jBirth || jPhone.length < 10) {
         return NextResponse.json({ success: false, code: 'INVALID_INPUT', message: '작업자의 이름·생년월일·연락처를 정확히 입력해 주세요.' }, { status: 400 });
       }

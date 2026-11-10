@@ -1,3 +1,4 @@
+import { normalizeKrPhone } from '@/lib/phone';
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { normalizePhone } from '@/lib/equipment';
@@ -17,7 +18,7 @@ export async function POST(req: Request) {
       typeof body.companyId === 'string' && body.companyId.trim() ? body.companyId.trim() : null;
     const workArea = (typeof body.workArea === 'string' ? body.workArea : '').trim() || '울산공장 구내 작업';
     const managerName = (typeof body.managerName === 'string' ? body.managerName : '').trim();
-    const managerPhone = (typeof body.managerPhone === 'string' ? body.managerPhone : '').replace(/[^0-9]/g, '');
+    const managerPhone = normalizeKrPhone(typeof body.managerPhone === 'string' ? body.managerPhone : '');
     const membersIn: any[] = Array.isArray(body.members) ? body.members : [];
 
     if (!companyId) {
@@ -60,7 +61,7 @@ export async function POST(req: Request) {
     const norm = (m: any) => ({
       name: (m?.name ?? '').trim(),
       birthDate: (m?.birthDate ?? '').trim() || null,
-      phone: (m?.phone ?? '').toString().replace(/[^0-9]/g, '') || null,
+      phone: normalizeKrPhone((m?.phone ?? '').toString()) || null,
     });
     const key = (m: { name: string; birthDate: string | null; phone: string | null }) =>
       `${m.name}||${m.birthDate ?? ''}||${normalizePhone(m.phone) ?? ''}`;

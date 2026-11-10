@@ -28,8 +28,10 @@ const TARGET_EMOJI: Record<string, string> = {
 export default function AccessPassResultPage() {
   const router = useRouter();
   const [data, setData] = useState<AccessPassData | null>(null);
+  const [fromDevice, setFromDevice] = useState(false);
 
   useEffect(() => {
+    setFromDevice(sessionStorage.getItem('accessPassFromDevice') === 'Y');
     const raw = sessionStorage.getItem('accessPassData');
     if (!raw) {
       router.replace('/access-pass');
@@ -170,6 +172,12 @@ export default function AccessPassResultPage() {
         <br />
         안내에 따릅니다.
       </div>
+
+      {fromDevice && (
+        <button type="button" className="w-full text-center text-sm text-slate-500 underline" onClick={() => router.push('/access-pass?manual=1')}>
+          다른 사람 출입증 보기
+        </button>
+      )}
 
       <button className="btn-secondary" onClick={() => router.push('/')}>
         홈으로

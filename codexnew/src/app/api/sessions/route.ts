@@ -1,3 +1,5 @@
+import { isPhoneProven } from '@/lib/device';
+import { normalizeKrPhone } from '@/lib/phone';
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { isEquipmentType, type EquipmentType } from '@/lib/equipment';
@@ -101,18 +103,10 @@ export async function POST(req: Request) {
     const supabase = createServiceClient();
 
     // [R-5] 휴대폰 문자 인증 서버 강제 — 프론트 우회 방지.
-    // 최근 30분 내 verified 기록이 있어야 세션 생성 허용 (최초/재교육 매번 동일).
-    const phoneDigits = String(phone).replace(/[^0-9]/g, '');
-    const verifyWindow = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-    const { data: verifiedRow } = await supabase
-      .from('phone_verifications')
-      .select('id')
-      .eq('phone', phoneDigits)
-      .not('verified_at', 'is', null)
-      .gte('verified_at', verifyWindow)
-      .limit(1)
-      .maybeSingle();
-    if (!verifiedRow) {
+    // 최근 30분 내 문자 인증, 또는 같은 사람(이름·생년월일·번호)으로 기억된 휴대폰이어야 세션 생성 허용.
+    const phoneDigits = normalizeKrPhone(String(phone));
+    const proven = await isPhoneProven(req, phoneDigits, { name: trimmedName, birthDate: String(birthDate ?? '') }, supabase);
+    if (!proven) {
       return NextResponse.json(
         { success: false, code: 'PHONE_NOT_VERIFIED', message: '휴대폰 문자 인증을 먼저 완료해 주세요.' },
         { status: 403 }
@@ -192,7 +186,7 @@ export async function POST(req: Request) {
         company_id: resolvedCompanyId,
         name: trimmedName,
         birth_date: birthDate,
-        phone,
+        phone: phoneDigits,
         vehicle_number: vehicleRequired ? vehicleNumberTrimmed : null,
         spec: specTrimmed || null,
         equipment_type: resolvedEquipmentType,

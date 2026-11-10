@@ -1,5 +1,6 @@
 'use client';
 
+import { normalizeKrPhone } from '@/lib/phone';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { readDraft, writeDraft, type WpParticipant } from '@/lib/work-permit-draft';
@@ -48,7 +49,7 @@ export default function WorkPermitParticipants() {
     setApplicantPhone(d.applicant.phone);
   }, [router]);
 
-  const formatPhone = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 11);
+  const formatPhone = normalizeKrPhone;
 
   const onCheck = async () => {
     setError('');
@@ -302,6 +303,8 @@ export default function WorkPermitParticipants() {
             </p>
             <input
               type="tel"
+              name="otp"
+              autoComplete="one-time-code"
               inputMode="numeric"
               className="input-base"
               value={otpCode}
@@ -356,15 +359,15 @@ export default function WorkPermitParticipants() {
       <div className="card space-y-3">
         <div>
           <label className="label">성명</label>
-          <input className="input-base" value={name} onChange={(e) => setName(e.target.value)} placeholder="홍길동" />
+          <input name="worker_name" autoComplete="off" className="input-base" value={name} onChange={(e) => setName(e.target.value)} placeholder="홍길동" />
         </div>
         <div>
           <label className="label">생년월일</label>
-          <input type="date" max="9999-12-31" className="input-base" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
+          <input type="date" max="9999-12-31" name="worker_bday" autoComplete="off" className="input-base" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
         </div>
         <div>
           <label className="label">연락처 (숫자만)</label>
-          <input type="tel" inputMode="numeric" className="input-base" value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} placeholder="01012345678" />
+          <input type="tel" name="worker_tel" autoComplete="off" inputMode="numeric" className="input-base" value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} placeholder="01012345678" />
         </div>
         {error && <div className="rounded-lg bg-red-50 p-2 text-sm text-red-700">{error}</div>}
         <button type="button" onClick={onCheck} disabled={checking} className="btn-secondary">

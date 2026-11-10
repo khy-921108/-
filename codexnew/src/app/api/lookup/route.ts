@@ -1,3 +1,4 @@
+import { normalizeKrPhone } from '@/lib/phone';
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 export const dynamic = 'force-dynamic';
@@ -18,7 +19,7 @@ export async function POST(req: Request) {
     const rawBirth: string = body?.birthDate ?? '';
 
     const name = rawName.trim();
-    const phone = rawPhone.replace(/[^0-9]/g, '');
+    const phone = normalizeKrPhone(rawPhone);
     const birthDate = rawBirth.trim();
 
     if (!name || !phone || !birthDate) {

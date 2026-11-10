@@ -1,3 +1,4 @@
+import { normalizeKrPhone } from './phone';
 import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'crypto';
 
 /**
@@ -37,7 +38,7 @@ function subKey(master: string, label: 'enc' | 'id'): Buffer {
 }
 
 function digits(s: unknown): string {
-  return (s ?? '').toString().replace(/[^0-9]/g, '');
+  return normalizeKrPhone((s ?? '').toString());
 }
 
 export function personKey(p: PersonInput): string {

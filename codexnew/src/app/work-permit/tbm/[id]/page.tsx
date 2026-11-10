@@ -6,11 +6,14 @@
  * 제출 시 안전환경에 알림 → 안전환경이 2차(입회) 승인 진행. 안전지시사항은 여기서 입력하지 않음.
  */
 
+import { normalizeKrPhone } from '@/lib/phone';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import SignaturePad from '@/components/SignaturePad';
 import { PLEDGE_INTRO, PLEDGE_CLAUSES } from '@/lib/work-permit-constants';
 import { writeSharedActivity } from '@/lib/admin-session';
+import { useDevice } from '@/lib/use-device';
+import { useRememberDevice } from '@/components/RememberDevice';
 
 interface Cred { name: string; birthDate: string; phone: string }
 interface RosterItem { name: string; companyName: string; confirmed: boolean }
@@ -146,13 +149,19 @@ export default function SiteTbmPage() {
   }, [data?.isAdmin]);
 
   // 진입 시: ① 관리자 로그인 세션이면 본인확인 없이 바로 진행(서버가 세션으로 인증)
-  //          ② 아니면 sessionStorage 자격 자동 사용(업체 경로)
+  //          ② 아니면 sessionStorage 자격(직접 입력 경로), ③ 없으면 기억된 휴대폰 정보 사용
+  const { me, loading: devLoading } = useDevice();
+  const remember = useRememberDevice();
+  const booted = useRef(false);
   useEffect(() => {
+    if (devLoading || booted.current) return;
+    booted.current = true;
     let cred0: Cred | null = null;
     try {
       const raw = sessionStorage.getItem('wp_tbm_cred');
       if (raw) cred0 = JSON.parse(raw);
     } catch { /* */ }
+    if (!cred0 && me) cred0 = { name: me.name, birthDate: me.birthDate, phone: me.phone };
     if (cred0) setForm(cred0);
     // 빈 자격으로 먼저 시도 → 관리자 세션이면 통과, 아니면 실패(조용히 무시하고 본인확인 폼 표시)
     const boot = async () => {
@@ -161,13 +170,14 @@ export default function SiteTbmPage() {
       if (json.success) { setCred(probe); setData(json.data); }
     };
     boot();
-  }, [call]);
+  }, [call, devLoading, me]);
 
   const onVerify = async () => {
     if (!form.name.trim() || !form.birthDate || form.phone.replace(/[^0-9]/g, '').length < 10) {
       setError('이름·생년월일·연락처를 정확히 입력해 주세요.'); return;
     }
-    setBusy(true); await loadSession(form); setBusy(false);
+    setBusy(true); const ok = await loadSession(form); setBusy(false);
+    if (ok) await remember.run(form);
   };
 
   const addPhoto = async (files: FileList | null) => {
@@ -355,18 +365,20 @@ export default function SiteTbmPage() {
           <h1 className="text-2xl font-bold text-slate-800">현장 TBM 진행</h1>
           <p className="mt-1 text-sm text-slate-500">신청 시 입력한 <b>이름·생년월일·연락처</b>로 본인확인 후 진행합니다.</p>
         </header>
-        <div className="card space-y-3">
+        <form className="card space-y-3" onSubmit={(e) => { e.preventDefault(); if (!busy) onVerify(); }}>
           <div><label className="label">성명</label>
-            <input className="input-base" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="홍길동" /></div>
+            <input name="name" autoComplete="name" className="input-base" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="홍길동" /></div>
           <div><label className="label">생년월일</label>
-            <input type="date" max="9999-12-31" className="input-base" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} /></div>
+            <input type="date" max="9999-12-31" name="bday" autoComplete="bday" className="input-base" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} /></div>
           <div><label className="label">연락처 (숫자만)</label>
-            <input type="tel" inputMode="numeric" className="input-base" value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value.replace(/[^0-9]/g, '').slice(0, 11) })} placeholder="01012345678" /></div>
+            <input type="tel" name="tel" autoComplete="tel" inputMode="numeric" className="input-base" value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: normalizeKrPhone(e.target.value) })} placeholder="01012345678" /></div>
+          {remember.checkbox}
           {error && <div className="rounded-lg bg-red-50 p-2 text-sm text-red-700">{error}</div>}
-          <button onClick={onVerify} disabled={busy} className="btn-primary">{busy ? '확인 중…' : '본인확인'}</button>
-          <button onClick={() => router.push('/work-permit/my')} className="btn-secondary">내 작업허가 목록</button>
-        </div>
+          <button type="submit" disabled={busy} className="btn-primary">{busy ? '확인 중…' : '본인확인'}</button>
+          <button type="button" onClick={() => router.push('/work-permit/my')} className="btn-secondary">내 작업허가 목록</button>
+        </form>
+        {remember.dialog}
       </main>
     );
   }
@@ -526,12 +538,12 @@ export default function SiteTbmPage() {
               {addWorker && (
                 <div className="rounded-lg border border-slate-200 p-3 space-y-2">
                   <p className="text-sm font-bold text-slate-700">👷 합류 작업자</p>
-                  <input className="input-base text-sm" placeholder="이름" value={joinForm.name}
+                  <input name="join_name" autoComplete="off" className="input-base text-sm" placeholder="이름" value={joinForm.name}
                     onChange={(e) => { setJoinForm({ ...joinForm, name: e.target.value }); setJoinCand(null); }} />
-                  <input type="date" max="9999-12-31" className="input-base text-sm" value={joinForm.birthDate}
+                  <input type="date" max="9999-12-31" name="join_bday" autoComplete="off" className="input-base text-sm" value={joinForm.birthDate}
                     onChange={(e) => { setJoinForm({ ...joinForm, birthDate: e.target.value }); setJoinCand(null); }} aria-label="생년월일" />
-                  <input type="tel" inputMode="numeric" className="input-base text-sm" placeholder="연락처(숫자만)" value={joinForm.phone}
-                    onChange={(e) => { setJoinForm({ ...joinForm, phone: e.target.value.replace(/[^0-9]/g, '').slice(0, 11) }); setJoinCand(null); }} />
+                  <input type="tel" name="join_tel" autoComplete="off" inputMode="numeric" className="input-base text-sm" placeholder="연락처(숫자만)" value={joinForm.phone}
+                    onChange={(e) => { setJoinForm({ ...joinForm, phone: normalizeKrPhone(e.target.value) }); setJoinCand(null); }} />
 
                   {!joinCand && !joinBlocked && (
                     <button onClick={checkWorker} disabled={addBusy} className="btn-secondary w-full text-sm">{addBusy ? '확인 중…' : '교육·서류 확인'}</button>
@@ -554,14 +566,14 @@ export default function SiteTbmPage() {
                             <div className="space-y-2 border-t border-amber-200 pt-2">
                               <p className="text-xs font-bold text-slate-700">📝 개인 안전준수 서약 작성</p>
                               <div className="grid grid-cols-2 gap-2">
-                                <select className="input-base text-sm" value={plForm.nationality} onChange={(e) => setPlForm({ ...plForm, nationality: e.target.value })}>
+                                <select name="pledge_nationality" autoComplete="off" className="input-base text-sm" value={plForm.nationality} onChange={(e) => setPlForm({ ...plForm, nationality: e.target.value })}>
                                   {['한국', '中国', 'Việt Nam', '기타'].map((n) => <option key={n} value={n}>{n}</option>)}
                                 </select>
-                                <select className="input-base text-sm" value={plForm.bloodType} onChange={(e) => setPlForm({ ...plForm, bloodType: e.target.value })}>
+                                <select name="pledge_blood" autoComplete="off" className="input-base text-sm" value={plForm.bloodType} onChange={(e) => setPlForm({ ...plForm, bloodType: e.target.value })}>
                                   {['A형', 'B형', 'O형', 'AB형'].map((b) => <option key={b} value={b}>{b}</option>)}
                                 </select>
                               </div>
-                              <input className="input-base text-sm" placeholder="직종 (예: 크레인 기사)" value={plForm.jobType} onChange={(e) => setPlForm({ ...plForm, jobType: e.target.value })} />
+                              <input name="pledge_job" autoComplete="off" className="input-base text-sm" placeholder="직종 (예: 크레인 기사)" value={plForm.jobType} onChange={(e) => setPlForm({ ...plForm, jobType: e.target.value })} />
                               <details className="rounded bg-white border border-slate-200 p-2 text-[11px] leading-relaxed text-slate-600">
                                 <summary className="cursor-pointer font-bold">서약 내용 보기</summary>
                                 <p className="mt-1">{PLEDGE_INTRO}</p>
@@ -583,7 +595,7 @@ export default function SiteTbmPage() {
                           {joinCand.pledgeOk && joinCand.undertakingStatus !== 'VALID' && (
                             <div className="space-y-2 border-t border-amber-200 pt-2">
                               <p className="text-xs font-bold text-slate-700">📄 업체 이행각서 명단 추가 재발급</p>
-                              <input className="input-base text-sm" placeholder="관리감독자명" value={utManager} onChange={(e) => setUtManager(e.target.value)} />
+                              <input name="supervisor_name" autoComplete="off" className="input-base text-sm" placeholder="관리감독자명" value={utManager} onChange={(e) => setUtManager(e.target.value)} />
                               <button onClick={reissueUndertaking} disabled={utBusy || !utManager.trim()} className="btn-primary w-full text-xs">
                                 {utBusy ? '재발급 중…' : '명단에 추가 재발급 후 계속'}
                               </button>
@@ -669,6 +681,7 @@ export default function SiteTbmPage() {
           </div>
         </div>
       )}
+      {remember.dialog}
     </main>
   );
 }

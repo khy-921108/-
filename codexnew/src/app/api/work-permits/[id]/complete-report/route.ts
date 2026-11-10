@@ -1,3 +1,4 @@
+import { normalizeKrPhone } from '@/lib/phone';
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { normalizePhone } from '@/lib/equipment';
@@ -25,7 +26,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     }
     const name = (body?.name ?? '').toString().trim();
     const birthDate = (body?.birthDate ?? '').toString().trim();
-    const phone = (body?.phone ?? '').toString().replace(/[^0-9]/g, '');
+    const phone = normalizeKrPhone((body?.phone ?? '').toString());
     const signature = (body?.signature ?? '').toString();
     const restoreState = typeof body?.restoreState === 'string' ? body.restoreState.trim() : '';
 

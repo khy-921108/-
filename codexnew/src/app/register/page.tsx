@@ -1,5 +1,6 @@
 'use client';
 
+import { normalizeKrPhone } from '@/lib/phone';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -9,6 +10,8 @@ import {
   type CompanyType,
 } from '@/lib/company';
 import { EQUIPMENT_TYPES, type EquipmentType } from '@/lib/equipment';
+import { isSameAsDevice, useDevice } from '@/lib/use-device';
+import { registerDeviceNow, useRememberDevice } from '@/components/RememberDevice';
 
 type TargetCode = 'TRUCK' | 'WORKER' | 'HEAVY';
 
@@ -69,6 +72,19 @@ export default function RegisterPage() {
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpError, setOtpError] = useState('');
   const [otpNotice, setOtpNotice] = useState('');
+
+  // 기억된 휴대폰: 이름·생년월일·번호를 채우고, 같은 사람이면 문자 인증을 건너뛴다(서버가 다시 확인).
+  const { me } = useDevice();
+  const remember = useRememberDevice();
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (!me || prefilled.current) return;
+    prefilled.current = true;
+    setName((v) => v || me.name);
+    setBirthDate((v) => v || me.birthDate);
+    setPhone((v) => v || me.phone);
+  }, [me]);
+  const deviceProven = isSameAsDevice(me, { name, birthDate, phone });
 
   const vehicleRequired =
     targetTypeCode === 'TRUCK' || targetTypeCode === 'HEAVY';
@@ -197,7 +213,7 @@ export default function RegisterPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetTypeCode]);
 
-  const formatPhone = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 11);
+  const formatPhone = normalizeKrPhone;
 
   const onSelectCompany = (c: CompanySummary) => {
     setSelectedCompany(c);
@@ -265,8 +281,7 @@ export default function RegisterPage() {
     name.trim() &&
     birthDate &&
     phone.length >= 10 &&
-    otpVerified &&
-    verifiedPhone === phone &&
+    ((otpVerified && verifiedPhone === phone) || deviceProven) &&
     targetTypeCode &&
     (!vehicleRequired || vehicleNumber.trim().length > 0) &&
     (!specRequired || spec.trim().length > 0) &&
@@ -324,6 +339,10 @@ export default function RegisterPage() {
         return;
       }
 
+      // 기억하기를 체크했으면 방금 한 문자 인증으로 바로 등록(실패해도 교육은 계속)
+      if (remember.checked && !remember.kakao && !deviceProven) {
+        await registerDeviceNow({ name: name.trim(), birthDate, phone });
+      }
       sessionStorage.setItem('sessionId', json.data.sessionId);
       router.push('/video');
     } catch (e) {
@@ -342,6 +361,8 @@ export default function RegisterPage() {
           수료증 발급에 필요한 정보입니다.
         </p>
       </header>
+
+      <form className="space-y-6" onSubmit={(e) => { e.preventDefault(); if (canSubmit) onSubmit(); }}>
 
       <div className="space-y-4">
         {/* 업체 검색/선택 */}
@@ -455,6 +476,8 @@ export default function RegisterPage() {
                   <div>
                     <label className="label">담당자명 (선택)</label>
                     <input
+                      name="company_manager_name"
+                      autoComplete="off"
                       className="input-base"
                       value={newCompanyManager}
                       onChange={(e) => setNewCompanyManager(e.target.value)}
@@ -464,6 +487,8 @@ export default function RegisterPage() {
                     <label className="label">담당자 연락처 (선택, 숫자만)</label>
                     <input
                       type="tel"
+                      name="company_manager_tel"
+                      autoComplete="off"
                       inputMode="numeric"
                       className="input-base"
                       value={newCompanyPhone}
@@ -504,6 +529,8 @@ export default function RegisterPage() {
         <div>
           <label className="label">성명</label>
           <input
+            name="name"
+            autoComplete="name"
             className="input-base"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -514,6 +541,8 @@ export default function RegisterPage() {
           <label className="label">생년월일</label>
           <input
             type="date" max="9999-12-31"
+            name="bday"
+            autoComplete="bday"
             className="input-base"
             value={birthDate}
             onChange={(e) => setBirthDate(e.target.value)}
@@ -523,22 +552,25 @@ export default function RegisterPage() {
           <label className="label">연락처 (숫자만)</label>
           <input
             type="tel"
+            name="tel"
+            autoComplete="tel"
             inputMode="numeric"
-            className="input-base"
+            className={otpVerified || deviceProven ? 'input-base bg-slate-100 text-slate-500' : 'input-base'}
             value={phone}
             onChange={(e) => setPhone(formatPhone(e.target.value))}
             placeholder="01012345678"
-            disabled={otpVerified}
+            readOnly={otpVerified || deviceProven}
           />
 
           {/* [R-5] 휴대폰 문자 인증 */}
-          {otpVerified ? (
+          {otpVerified || deviceProven ? (
             <div className="mt-2 flex items-center gap-2 rounded-xl border-2 border-emerald-300 bg-emerald-50 px-4 py-3">
               <span className="text-lg">✅</span>
-              <span className="font-bold text-emerald-700">본인 인증 완료</span>
+              <span className="font-bold text-emerald-700">{otpVerified ? '본인 인증 완료' : '기억된 휴대폰 — 문자 인증 생략'}</span>
               <button
                 type="button"
                 onClick={() => {
+                  if (!otpVerified) setPhone('');
                   setOtpVerified(false);
                   setOtpSent(false);
                   setOtpCode('');
@@ -613,6 +645,7 @@ export default function RegisterPage() {
             </div>
           )}
         </div>
+        {!deviceProven && remember.checkbox}
         <div>
           <label className="label">대상 구분</label>
           <div className="grid grid-cols-3 gap-2">
@@ -708,13 +741,13 @@ export default function RegisterPage() {
       )}
 
       <button
-        type="button"
-        onClick={onSubmit}
+        type="submit"
         disabled={!canSubmit}
         className="btn-primary"
       >
         {loading ? '확인 중...' : '교육 시작'}
       </button>
+      </form>
     </main>
   );
 }

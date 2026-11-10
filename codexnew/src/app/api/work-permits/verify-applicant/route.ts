@@ -1,3 +1,4 @@
+import { normalizeKrPhone } from '@/lib/phone';
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { maskPhone } from '@/lib/format';
@@ -20,7 +21,7 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const name = (typeof body.name === 'string' ? body.name : '').trim();
     const birthDate = (typeof body.birthDate === 'string' ? body.birthDate : '').trim();
-    const phone = (typeof body.phone === 'string' ? body.phone : '').replace(/[^0-9]/g, '');
+    const phone = normalizeKrPhone(typeof body.phone === 'string' ? body.phone : '');
 
     if (!name || !birthDate || !phone) {
       return NextResponse.json(

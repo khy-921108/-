@@ -1,3 +1,5 @@
+import { isPhoneProven } from '@/lib/device';
+import { normalizeKrPhone } from '@/lib/phone';
 import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { ApplicantQueryError, resolveApplicantCompany } from '@/lib/applicant-company';
@@ -6,7 +8,6 @@ import { isPersonRefEnabled, personIdOf, personKey, sealPersonRef } from '@/lib/
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 
-const VERIFY_WINDOW_MS = 30 * 60 * 1000;
 const PAGE_SIZE = 1000;
 const ID_CHUNK = 200;
 
@@ -61,7 +62,7 @@ export async function POST(req: Request) {
     const applicant = body?.applicant ?? {};
     const name = (typeof applicant.name === 'string' ? applicant.name : '').trim();
     const birthDate = (typeof applicant.birthDate === 'string' ? applicant.birthDate : '').trim();
-    const phone = (typeof applicant.phone === 'string' ? applicant.phone : '').replace(/[^0-9]/g, '');
+    const phone = normalizeKrPhone(typeof applicant.phone === 'string' ? applicant.phone : '');
     const workEnd = typeof body?.workEnd === 'string' ? body.workEnd : '';
 
     const workEndTs = new Date(workEnd).getTime();
@@ -82,17 +83,12 @@ export async function POST(req: Request) {
       return fail('NO_COMPANY', '신청인 소속 업체를 사용할 수 없습니다. 아래에서 직접 입력해 주세요.', 403);
     }
 
-    const verifiedSince = new Date(Date.now() - VERIFY_WINDOW_MS).toISOString();
-    const { data: verified, error: verifyErr } = await supabase
-      .from('phone_verifications')
-      .select('id')
-      .eq('phone', phone)
-      .not('verified_at', 'is', null)
-      .gte('verified_at', verifiedSince)
-      .limit(1)
-      .maybeSingle();
-    if (verifyErr) {
-      console.error('[company-roster] phone check:', verifyErr);
+    // 최근 30분 문자 인증 또는 신청인 본인으로 기억된 휴대폰이면 통과
+    let verified = false;
+    try {
+      verified = await isPhoneProven(req, phone, { name, birthDate }, supabase);
+    } catch (e) {
+      console.error('[company-roster] phone check:', e);
       return fail('QUERY_FAILED', '조회 중 오류가 발생했습니다.', 500);
     }
     if (!verified) {

@@ -7,6 +7,7 @@
  * - 성공 시 verified_at 기록 → /api/sessions 가 이 기록을 요구(서버 강제).
  */
 
+import { normalizeKrPhone } from '@/lib/phone';
 import { NextResponse } from 'next/server';
 import { createHash } from 'crypto';
 import { createServiceClient } from '@/lib/supabase/server';
@@ -20,7 +21,7 @@ const MAX_ATTEMPTS = 5;
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const phone = onlyDigits(typeof body.phone === 'string' ? body.phone : '');
+    const phone = normalizeKrPhone(typeof body.phone === 'string' ? body.phone : '');
     const code = onlyDigits(typeof body.code === 'string' ? body.code : '');
     if (!phone || code.length !== 6) {
       return NextResponse.json(

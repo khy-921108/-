@@ -1,10 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { normalizeKrPhone } from '@/lib/phone';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { SUPPLEMENTAL_WORKS } from '@/lib/work-permit-constants';
 import { STAGE_BADGE_CLASS, type Stage } from '@/lib/work-permit-stage';
 import { writeDraft, clearDraft } from '@/lib/work-permit-draft';
+import { isSameAsDevice, useDevice } from '@/lib/use-device';
+import { useRememberDevice } from '@/components/RememberDevice';
 import SignaturePad from '@/components/SignaturePad';
 
 interface CopySource {
@@ -61,19 +64,6 @@ const FRIENDLY_STATUS: Record<string, string> = {
   IN_PROGRESS: '진행 중',
 };
 
-// 본인확인 20분 기억(자동 채움 전용)
-const CRED_KEY = 'wp_my_cred';
-const CRED_TTL_MS = 20 * 60 * 1000;
-
-/** 기억된 정보를 화면에 알릴 때 쓰는 마스킹 — 예) 김○○ · 010-****-1108 */
-function maskCred(name: string, phone: string): string {
-  const n = name.trim();
-  const mName = n ? n[0] + '○'.repeat(Math.max(n.length - 1, 1)) : '';
-  const d = phone.replace(/[^0-9]/g, '');
-  const mPhone = d.length >= 8 ? `${d.slice(0, 3)}-****-${d.slice(-4)}` : '';
-  return [mName, mPhone].filter(Boolean).join(' · ');
-}
-
 export default function MyWorkPermits() {
   const router = useRouter();
 
@@ -93,7 +83,11 @@ export default function MyWorkPermits() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [remembered, setRemembered] = useState(''); // 자동 채움된 정보(마스킹 표시용)
+  // 기억된 휴대폰이면 바로 목록 / "다른 사람 조회"
+  const { me, loading: devLoading } = useDevice();
+  const remember = useRememberDevice();
+  const [manual, setManual] = useState(false);
+  const autoTried = useRef(false);
 
   // 작업 종료 신고(소장 직접)
   const [reportFor, setReportFor] = useState<Item | null>(null);
@@ -101,34 +95,16 @@ export default function MyWorkPermits() {
   const [reportBusy, setReportBusy] = useState(false);
   const [reportErr, setReportErr] = useState('');
 
-  const formatPhone = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 11);
+  const formatPhone = normalizeKrPhone;
 
-  // 진입 시 20분 이내에 본인확인한 정보가 있으면 자동으로 채운다(만료분은 삭제).
-  // 🔴 서버 검증은 그대로 — 자동 채움일 뿐, 요청마다 3요소를 다시 검증한다.
+  // 예전 20분 기억(localStorage)은 이 휴대폰 기억하기로 대체 — 남은 값은 지운다.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(CRED_KEY);
-      if (!raw) return;
-      const c = JSON.parse(raw);
-      if (!c?.exp || Date.now() > c.exp) { localStorage.removeItem(CRED_KEY); return; }
-      setName(c.name ?? '');
-      setBirthDate(c.birthDate ?? '');
-      setPhone(c.phone ?? '');
-      setRemembered(maskCred(c.name ?? '', c.phone ?? ''));
-    } catch { try { localStorage.removeItem(CRED_KEY); } catch { /* */ } }
+    try { localStorage.removeItem('wp_my_cred'); } catch { /* */ }
   }, []);
 
-  // 본인확인 통과 시점부터 20분간 기억(재입력 방지)
-  const rememberCred = () => {
-    try {
-      localStorage.setItem(CRED_KEY, JSON.stringify({ name: name.trim(), birthDate, phone, exp: Date.now() + CRED_TTL_MS }));
-      setRemembered(maskCred(name, phone));
-    } catch { /* */ }
-  };
-
-  const search = async (m = month) => {
+  const search = async (m = month, who = { name, birthDate, phone }, auto = false) => {
     setError('');
-    if (!name.trim() || !birthDate || phone.length < 10) {
+    if (!who.name.trim() || !who.birthDate || who.phone.length < 10) {
       setError('이름·생년월일·연락처를 정확히 입력해 주세요.');
       return;
     }
@@ -137,7 +113,7 @@ export default function MyWorkPermits() {
       const res = await fetch('/api/work-permits/my-list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, birthDate, phone, month: m }),
+        body: JSON.stringify({ name: who.name, birthDate: who.birthDate, phone: who.phone, month: m }),
       });
       const json = await res.json();
       if (!json.success) {
@@ -147,13 +123,33 @@ export default function MyWorkPermits() {
       }
       setItems(json.data.items);
       setPage(1);
-      rememberCred();
+      if (!auto && items === null) await remember.run(who);
     } catch (e) {
       console.error(e);
       setError('네트워크 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    if (devLoading || autoTried.current) return;
+    autoTried.current = true;
+    if (!me) return;
+    setName(me.name);
+    setBirthDate(me.birthDate);
+    setPhone(me.phone);
+    search(month, { name: me.name, birthDate: me.birthDate, phone: me.phone }, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devLoading, me]);
+
+  const lookupOther = () => {
+    setManual(true);
+    setItems(null);
+    setName('');
+    setBirthDate('');
+    setPhone('');
+    setError('');
   };
 
   // 월 이동 — 이미 조회한 상태면 새 달로 자동 재조회
@@ -195,10 +191,12 @@ export default function MyWorkPermits() {
     router.push('/work-permit/info');
   };
 
-  // 현장 TBM 화면으로 이동 — 본인확인 정보를 sessionStorage로 전달(재입력 방지)
+  // 현장 TBM 화면으로 이동 — 기억된 휴대폰 본인이면 TBM 화면이 기억 정보를 쓰고,
+  //  직접 입력한 경우에만 sessionStorage로 전달(재입력 방지)
   const goTbm = (permitId: string) => {
     try {
-      sessionStorage.setItem('wp_tbm_cred', JSON.stringify({ name, birthDate, phone }));
+      if (isSameAsDevice(me, { name, birthDate, phone })) sessionStorage.removeItem('wp_tbm_cred');
+      else sessionStorage.setItem('wp_tbm_cred', JSON.stringify({ name, birthDate, phone }));
     } catch { /* */ }
     router.push(`/work-permit/tbm/${permitId}`);
   };
@@ -243,25 +241,28 @@ export default function MyWorkPermits() {
         </p>
       </header>
 
-      <div className="card space-y-3">
-        {/* 어떤 정보가 이 기기에 남아 있는지 사용자가 알 수 있게 마스킹으로 표시 */}
-        {remembered && (
-          <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-600">
-            🔒 <b>{remembered}</b> · 20분간 기억됨 <span className="text-slate-400">(이 기기에만 저장, 20분 뒤 자동 삭제)</span>
+      <form className="card space-y-3" onSubmit={(e) => { e.preventDefault(); if (!loading) search(month); }}>
+        {/* 기억된 휴대폰 본인으로 조회 중이면 누구인지 가려서 표시 */}
+        {me && !manual && isSameAsDevice(me, { name, birthDate, phone }) && (
+          <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-600">
+            <span>🔒 <b>{me.nameMasked}</b> · {me.phoneMasked} · 이 휴대폰 기억 중</span>
+            <button type="button" onClick={lookupOther} className="shrink-0 underline">다른 사람 조회</button>
           </div>
         )}
         <div>
           <label className="label">성명</label>
-          <input className="input-base" value={name} onChange={(e) => setName(e.target.value)} placeholder="홍길동" />
+          <input name="name" autoComplete="name" className="input-base" value={name} onChange={(e) => setName(e.target.value)} placeholder="홍길동" />
         </div>
         <div>
           <label className="label">생년월일</label>
-          <input type="date" max="9999-12-31" className="input-base" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
+          <input type="date" max="9999-12-31" name="bday" autoComplete="bday" className="input-base" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
         </div>
         <div>
           <label className="label">연락처 (숫자만)</label>
           <input
             type="tel"
+            name="tel"
+            autoComplete="tel"
             inputMode="numeric"
             className="input-base"
             value={phone}
@@ -269,12 +270,14 @@ export default function MyWorkPermits() {
             placeholder="01012345678"
           />
         </div>
+        {!isSameAsDevice(me, { name, birthDate, phone }) && remember.checkbox}
 
         {/* 조회 월 선택기 (◀ 6개월 전 ~ ▶ 다음 달) */}
         <div>
           <label className="label">조회 월</label>
           <div className="flex items-center justify-center gap-3">
             <button
+              type="button"
               onClick={() => changeMonth(-1)}
               disabled={month <= minMonth}
               className="h-9 w-9 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-30 text-lg leading-none"
@@ -282,6 +285,7 @@ export default function MyWorkPermits() {
             >◀</button>
             <span className="text-base font-bold text-slate-800 w-32 text-center">{my}년 {Number(mm)}월</span>
             <button
+              type="button"
               onClick={() => changeMonth(1)}
               disabled={month >= maxMonth}
               className="h-9 w-9 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-30 text-lg leading-none"
@@ -292,10 +296,10 @@ export default function MyWorkPermits() {
         </div>
 
         {error && <div className="rounded-lg bg-red-50 p-2 text-sm text-red-700">{error}</div>}
-        <button onClick={() => search(month)} disabled={loading} className="btn-primary">
+        <button type="submit" disabled={loading} className="btn-primary">
           {loading ? '조회 중...' : '조회'}
         </button>
-      </div>
+      </form>
 
       {items !== null && (
         <div className="space-y-2">
@@ -446,6 +450,7 @@ export default function MyWorkPermits() {
           </div>
         </div>
       )}
+      {remember.dialog}
     </main>
   );
 }

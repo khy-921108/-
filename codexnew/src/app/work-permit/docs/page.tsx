@@ -1,5 +1,6 @@
 'use client';
 
+import { normalizeKrPhone } from '@/lib/phone';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { participantPayload, readDraft, type WpParticipant } from '@/lib/work-permit-draft';
@@ -204,7 +205,7 @@ export default function WorkPermitDocs() {
     }
   };
 
-  const formatPhone = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 11);
+  const formatPhone = normalizeKrPhone;
 
   return (
     <main className="space-y-6">
@@ -243,6 +244,8 @@ export default function WorkPermitDocs() {
                       <div>
                         <label className="label">국적</label>
                         <select
+                          name={`pledge_nationality_${i}`}
+                          autoComplete="off"
                           className="input-base"
                           value={form.nationality}
                           onChange={(e) => setPForm((f) => ({ ...f, [i]: { ...form, nationality: e.target.value } }))}
@@ -253,6 +256,8 @@ export default function WorkPermitDocs() {
                       <div>
                         <label className="label">혈액형</label>
                         <select
+                          name={`pledge_blood_${i}`}
+                          autoComplete="off"
                           className="input-base"
                           value={form.bloodType}
                           onChange={(e) => setPForm((f) => ({ ...f, [i]: { ...form, bloodType: e.target.value } }))}
@@ -264,6 +269,8 @@ export default function WorkPermitDocs() {
                       <div>
                         <label className="label">직종</label>
                         <input
+                          name={`pledge_job_${i}`}
+                          autoComplete="off"
                           className="input-base"
                           value={form.jobType}
                           onChange={(e) => setPForm((f) => ({ ...f, [i]: { ...form, jobType: e.target.value } }))}
@@ -322,11 +329,11 @@ export default function WorkPermitDocs() {
                   )}
                   <div>
                     <label className="label">관리감독자명</label>
-                    <input className="input-base" value={uManager} onChange={(e) => setUManager(e.target.value)} />
+                    <input name="supervisor_name" autoComplete="off" className="input-base" value={uManager} onChange={(e) => setUManager(e.target.value)} />
                   </div>
                   <div>
                     <label className="label">관리감독자 연락처 (선택)</label>
-                    <input type="tel" inputMode="numeric" className="input-base" value={uPhone} onChange={(e) => setUPhone(formatPhone(e.target.value))} placeholder="01012345678" />
+                    <input type="tel" name="supervisor_tel" autoComplete="off" inputMode="numeric" className="input-base" value={uPhone} onChange={(e) => setUPhone(formatPhone(e.target.value))} placeholder="01012345678" />
                   </div>
                   <div>
                     <label className="label">작업구역 (선택)</label>

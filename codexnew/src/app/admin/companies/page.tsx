@@ -1,5 +1,6 @@
 'use client';
 
+import { normalizeKrPhone } from '@/lib/phone';
 import { useEffect, useRef, useState } from 'react';
 import {
   COMPANY_STATUS,
@@ -470,7 +471,7 @@ function CompanyEditModal({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
 
-  const formatPhone = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 11);
+  const formatPhone = normalizeKrPhone;
   const rules = companyFieldRules(companyType);
 
   const onSave = async () => {
@@ -584,7 +585,7 @@ function CompanyEditModal({
               <div>
                 <label className="label">대표번호 (정식등록 시 필수)</label>
                 <input type="tel" inputMode="numeric" className="input-base" value={tel}
-                  onChange={(e) => setTel(e.target.value.replace(/[^0-9]/g, '').slice(0, 12))} placeholder="0522345678" />
+                  onChange={(e) => setTel(normalizeKrPhone(e.target.value))} placeholder="0522345678" />
               </div>
             </>
           )}
@@ -881,7 +882,7 @@ function MemberAddForm({
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
 
-  const formatPhone = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 11);
+  const formatPhone = normalizeKrPhone;
   const showVehicle = memberType === 'TRUCK' || memberType === 'HEAVY';
 
   const submit = async () => {
